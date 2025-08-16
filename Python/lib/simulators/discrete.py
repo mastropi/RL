@@ -44,7 +44,7 @@ from Python.lib.agents.policies.parameterized import PolNN
 from Python.lib.simulators.fv import reactivate_particle, StoppingCriterion
 from Python.lib.simulators import DEBUG_TRAJECTORIES, MAX_NUMBER_OF_STEPS_FOR_EXPECTATION, MIN_NUM_CYCLES_FOR_EXPECTATIONS, choose_state_from_set, parse_simulation_parameters, show_messages
 
-from Python.lib.utils.basic import find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, is_integer, keep_dict_params_defined_in_function, measure_exec_time
+from Python.lib.utils.basic import create_random_number_generator, find_signed_max_value, generate_datetime_string, get_current_datetime_as_string, is_integer, keep_dict_params_defined_in_function, measure_exec_time
 from Python.lib.utils.computing import compute_expected_reward, compute_set_of_frequent_states_with_zero_reward, compute_survival_probability, mape, rmse
 from Python.lib.utils.plotting import update_plots
 
@@ -1454,22 +1454,10 @@ class Simulator:
         if max_time_steps is None or max_time_steps < 0 or max_time_steps == +np.Inf:
             raise ValueError(f"Parameter `max_time_steps` must be a positive finite number: {max_time_steps}")
 
-        policy = self.getAgent().getPolicy()
-        learner = self.getAgent().getLearner()
+        policy = self.agent.getPolicy()
+        learner = self.agent.getLearner()
 
-        # Set seeds of:
-        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
-        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
-        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
-        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
-        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
-        #   and then to actually choose that random action, if this ends up being the case.
-        # - the object's environment --> responsible of deciding on the next state given the action.
-        if seed is not None:
-            torch.manual_seed(seed)
-            policy.env.seed(seed)
-            np.random.seed(seed)
-            self.env.seed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the environment to a state according to its initial state distribution
         self.env.reset()
@@ -1518,8 +1506,8 @@ class Simulator:
 
             if done_episode:
                 # We have reached a terminal state
-                # => Reset the environment
-                action = 0
+                # => Reset the environment with a RANDOM action
+                action = np_random.choice(np.arange(self.env.getNumActions()))
                 next_state = self.env.reset()
                 reward = self.env.getReward(next_state)
                 done_episode = next_state in self.env.getTerminalStates()
@@ -1589,22 +1577,10 @@ class Simulator:
         if max_time_steps is None or max_time_steps < 0:
             raise ValueError(f"Parameter `max_time_steps` must be a positive number: {max_time_steps}")
 
-        policy = self.getAgent().getPolicy()
-        learner = self.getAgent().getLearner()
+        policy = self.agent.getPolicy()
+        learner = self.agent.getLearner()
 
-        # Set seeds of:
-        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
-        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
-        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
-        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
-        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
-        #   and then to actually choose that random action, if this ends up being the case.
-        # - the object's environment --> responsible of deciding on the next state given the action.
-        if seed is not None:
-            torch.manual_seed(seed)
-            policy.env.seed(seed)
-            np.random.seed(seed)
-            self.env.seed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the environment to a state according to its initial state distribution
         self.env.reset()
@@ -1630,10 +1606,10 @@ class Simulator:
 
             if done_episode:
                 # We have reached a terminal state
-                # => Reset the environment and the trajectories stored in the learner
+                # => Reset the environment and the trajectories stored in the learner with a RANDOM action
 
                 t_episode = -1
-                action = 0
+                action = np_random.choice(np.arange(self.env.getNumActions()))
                 next_state = self.env.reset()
                 reward = self.env.getReward(next_state)
                 done_episode = next_state in self.env.getTerminalStates()
@@ -1661,11 +1637,14 @@ class Simulator:
 
             # Learn (and update the trajectory stored in the learner)
             learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
-            if not self.env.isStateContinuous():
-                if state in self.env.getTerminalStates():
-                    # Copy to all possible actions the Q-value just learned for the taken (dummy) action used to reset the environment when reaching a terminal state
-                    self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
-                    self._copy_action_values_for_terminal_state(learner.getA(), state, action)
+            if False:
+                # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions
+                # because they are all equivalent (they all lead to the same set of next states, which is always the same state if the environment has only one start state).
+                if not self.env.isStateContinuous():
+                    if state in self.env.getTerminalStates():
+                        # Copy to all possible actions the Q-value just learned for the taken (dummy) action used to reset the environment when reaching a terminal state
+                        self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
+                        self._copy_action_values_for_terminal_state(learner.getA(), state, action)
 
             if show_messages(verbose, verbose_period, t):
                 print(f"t: {t}, t in episode: {t_episode}, s={state}, a={action} -> ns={next_state}, r={reward}, " +
@@ -2050,21 +2029,23 @@ class Simulator:
         policy = self.agent.getPolicy()     # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
+        # NOTE: (2025/08/16) We do NOT call the new self._set_seeds() method because we don't want to set all seeds set there because of the special situation of the FV system:
+        # - The environment seed is set below for each environment COPY assigned to each FV particle.
+        # - The numpy seed has already been set at the very beginning of the process, by method _estimate_value_functions_and_expected_reward_fv().
+        # Since this is not the case in the single Markov explorations run by the run_exploration*() methods, the numpy random seed is set in those methods.
+        # Another reason for not setting the numpy random seed here is that the expected results of FV unit tests would change and I don't want to update them now.
+        #
         # Set seeds of:
         # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
         # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
         #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
-        # - numpy [NOT SET, see below] --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
-        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
-        #   and then to actually choose that random action, if this ends up being the case.
-        #   NOTE HOWEVER: We do NOT set the numpy random seed because for FV this has already been set at the very beginning of the process,
-        #   by method _estimate_value_functions_and_expected_reward_fv(). Since this is not the case in the single Markov explorations
-        #   run by the run_exploration*() methods, the numpy random seed is set in those methods.
-        #   Another reason for not setting the numpy random seed here is that the expected results of FV unit tests would change and I don't want to update them now.
+        # - a newly created random number generator (np_random) used to generate the random anchor actions taken at terminal states.
         if seed is not None:
             torch.manual_seed(seed)
             policy.env.seed(seed)
-            #np.random.seed(seed)   # Not set because of the reasons indicated in the above comments
+            # Separate random number generator for the random action taken at terminal states
+            # Goal: Avoid interference with the actions chosen by the policy, thus maintaining unit tests results, even if a random action on terminal state is selected.
+            np_random = create_random_number_generator(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # (UNLESS reward shaping was performed during the initial exploration of the environment to promote a policy that takes the agent towards the boundary of A,
@@ -2306,7 +2287,11 @@ class Simulator:
                 # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                 # - The seed for the reset has been set separately for each particle before starting the FV simulation.
                 # - As no action is conceptually associated to a terminal state (by definition), we need to choose one.
-                action = 0
+                # But it is IMPORTANT that the chosen action be RANDOM in order to avoid any preference to a particular action, which may impact learning,
+                # specially if the FV system has many particles in a terminal state.
+                # Choosing always the same fictitious action has been observed to affect the policy learning of the start state,
+                # and generated a period of policy unlearning, both in FVAC(lambda) and FVAC(0) contexts, although I don't really understand at this point why this happens.
+                action = np_random.choice(np.arange(self.env.getNumActions()))
                 next_state = envs[idx_particle].reset()
                 reward = envs[idx_particle].getReward(next_state)
                 if DEBUG_TRAJECTORIES:
@@ -2749,11 +2734,7 @@ class Simulator:
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
-        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
-        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
-        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
-        if seed is not None:
-            policy.env.seed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
@@ -2834,7 +2815,7 @@ class Simulator:
                     # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                     # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                     # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
-                    action = 0
+                    action = np_random.choice(np.arange(self.env.getNumActions()))
                     next_state = envs[idx_particle].reset()
                     reward = envs[idx_particle].getReward(next_state)
                     if DEBUG_TRAJECTORIES:
@@ -3090,11 +3071,7 @@ class Simulator:
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
-        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
-        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
-        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
-        if seed is not None:
-            policy.env.seed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
@@ -3171,7 +3148,7 @@ class Simulator:
                     # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                     # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                     # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
-                    action = 0
+                    action = np_random.choice(np.arange(self.env.getNumActions()))
                     next_state = envs[idx_particle].reset()
                     reward = envs[idx_particle].getReward(next_state)
                     if DEBUG_TRAJECTORIES:
@@ -3481,11 +3458,7 @@ class Simulator:
         policy = self.agent.getPolicy()  # Used to define the next action and next state
         learner = self.agent.getLearner()  # Used to learn (or keep learning) the value functions
 
-        # Set the seed of the environment stored in the policy which is the one responsible for defining the next action of the agent
-        # Note that this environment normally coincides with the environment stored in this Simulator object, but it may not always be the case
-        # (this already happened when I was using different COPIES of a policy to compare different value function learners! May-2024)
-        if seed is not None:
-            policy.env.seed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the learner, but WITHOUT resetting the value functions as they were possibly learned a bit during an initial exploration of the environment
         # What is most important of this reset is to reset the learning rates of all states and actions! (so that we start the FV-based learning with full intensity)
@@ -3673,7 +3646,7 @@ class Simulator:
                 # e.g. by the toy_text.discrete.DiscreteEnv environment's reset() method where the initial state
                 # is chosen based on the isd attribute of the object, i.e. of the Initial State Distribution defining the initial state.
                 # Note also that the seed for the reset has been set separately for each particle before starting the FV simulation.
-                action = 0
+                action = np_random.choice(np.arange(self.env.getNumActions()))
                 next_state = envs[idx_particle].reset()
                 reward = envs[idx_particle].getReward(next_state)
                 if DEBUG_TRAJECTORIES:
@@ -4120,19 +4093,7 @@ class Simulator:
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
 
-        # Set seeds of:
-        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
-        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
-        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
-        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
-        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
-        #   and then to actually choose that random action, if this ends up being the case.
-        # - the object's environment --> responsible of deciding on the next state given the action.
-        if seed is not None:
-            torch.manual_seed(seed)
-            policy.env.seed(seed)
-            np.random.seed(seed)
-            self.env.setSeed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the environment (this should be done BEFORE resetting the learner because the learner will most likely store the reward at the initial state by calling
         # self.env.getReward() on the self.env.getState(), and if the state stored in the environment (from e.g. a previous execution/replication of the learning process),
@@ -4255,7 +4216,8 @@ class Simulator:
                     # because its value is not necessarily 0! (as long as this is NOT the first episode, which is the case at this point)
                     # (the value of a terminal state is 0 only in EPISODIC learning tasks, in which case it is 0 by definition of terminal states).
                     # In fact, in the continuing learning task, the environment state goes to a start state when the episode "terminates" and the Markov process continues.
-                    action = 0
+                    # We choose a RANDOM action to transition to the start state as no particular action is associated to a terminal state, by definition of terminal state.
+                    action = np_random.choice(np.arange(self.env.getNumActions()))
                     reward = self.env.getReward(self.env.getState())
                     self.learn_terminal_state_values(learner, t_episode, terminal_state_previous_episode, action, self.env.getState(), reward, info, done_episode=done_episode)
                         ## Notes:
@@ -4693,19 +4655,7 @@ class Simulator:
         policy = self.agent.getPolicy()
         learner = self.agent.getLearner()
 
-        # Set seeds of:
-        # - torch --> responsible for selecting the action when the policy is modeled via a neural network.
-        # - the policy's environment --> just in case this environment does NOT have the same memory address as self.env
-        #   (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
-        # - numpy --> responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
-        #   numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
-        #   and then to actually choose that random action, if this ends up being the case.
-        # - the object's environment --> responsible of deciding on the next state given the action.
-        if seed is not None:
-            torch.manual_seed(seed)
-            policy.env.seed(seed)
-            np.random.seed(seed)
-            self.env.setSeed(seed)
+        np_random = self._set_seeds(seed)
 
         # Reset the environment (this should be done BEFORE resetting the learner because the learner will most likely store the reward at the initial state by calling
         # self.env.getReward() on the self.env.getState(), and if the state stored in the environment (from e.g. a previous execution/replication of the learning process),
@@ -4912,8 +4862,8 @@ class Simulator:
                     # whereas *`next_state`* is the start state. So t_episode = 0 should be set at the next iteration.
                     t_episode = -1
 
-                    # Perform the action of going to an environment's start state
-                    action = 0
+                    # Perform a RANDOM action of going to an environment's start state, as there is actually no action associated to restarting the agent's location
+                    action = np_random.choice(np.arange(self.env.getNumActions()))
                     next_state = self.env.reset()
                     reward = self.env.getReward(next_state)
                     done_episode = next_state in self.env.getTerminalStates()
@@ -5021,9 +4971,12 @@ class Simulator:
                     # in which case parameter use_fixed_average_reward is set to False.
                     info['average_reward'] = estimated_average_reward
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
-                if not self.env.isStateContinuous() and state in self.env.getTerminalStates():
-                    self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
-                    self._copy_action_values_for_terminal_state(learner.getA(), state, action)
+                if False:
+                    # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions
+                    # because they are all equivalent (they all lead to the same set of next states, which is always the same state if the environment has only one start state).
+                    if not self.env.isStateContinuous() and state in self.env.getTerminalStates():
+                        self._copy_action_values_for_terminal_state(learner.getQ(), state, action)
+                        self._copy_action_values_for_terminal_state(learner.getA(), state, action)
 
                 #---- UPDATE FOR CONTINUING TASK
                 # Plotting step moved INSIDE the episode because there is only 1 episode!
@@ -5225,6 +5178,34 @@ class Simulator:
     def _get_advantage_value(self, learner, state, action):
         "Returns the action value for the given state and action stored in the given learner depending on whether the function is tabular or not and on whether the state is continuous or not"
         return learner.getA().getValue(self.env.getIndexFromState(state), action) if self.env.isStateContinuous() and learner.getA().isTabular() else learner.getA().getValue(state, action)
+
+    def _set_seeds(self, seed=None):
+        """
+        Sets seeds and returns an independent random number generator
+
+        When `seed` is not None, sets the seeds of:
+        - torch:                    Responsible for selecting the action when the policy is modeled via a neural network.
+        - the policy's environment: Just in case this environment does NOT have the same memory address as self.env
+                                    (e.g. when policies are deepcopied from the original policy in order to compare different learning methods)
+        - numpy:                    Responsible for deciding whether a (completely) random action is chosen (when epsilon_random_action > 0).
+                                    numpy is used to both draw a random number to decide whether to choose a random action (without following the policy)
+                                    and then to actually choose that random action, if this ends up being the case.
+        - the object's environment: Responsible of deciding on the next state given the action.
+
+        Return: np.random.RandomState()
+        A random number generator based on np.random that can be used independently of the main random number stream generated by np.random functions.
+        """
+        if seed is not None:
+            torch.manual_seed(seed)
+            self.agent.getPolicy().env.seed(seed)
+            np.random.seed(seed)
+            self.env.seed(seed)
+
+        # Separate random number generator for the random action taken at terminal states
+        # Goal: Avoid interference with the actions chosen by the policy, thus maintaining unit tests results, even if a random action on terminal state is selected.
+        np_random = create_random_number_generator(seed)
+
+        return np_random
 
     def _choose_action(self, policy, state, epsilon_random_action=0.0):
         """
@@ -5937,13 +5918,17 @@ class Simulator:
         if t <= 0:
             info.pop('update_trajectory_and_average_reward')
 
-        # Copy the action and advantage value just learned to the value associated to the other possible actions that could have been taken at this terminal state
-        # TODO: (2024/08/23) If it becomes necessary, we could implement the copy of Q(s,a) for the case of continuous-state environments by performing all possible actions on the same continuous-valued state visited when `done` and learning from those actions (i.e. calling learner.learn())
-        # Note that in principle, this copy operation IS necessary because, when learning the action value of the state just BEFORE visiting a terminal state,
-        # the average of Q(s,a) over all actions at the next state (i.e. the terminal state in this case) is used in the computation of the TD error (see LeaTD._compute_deltas()).
-        if not self.env.isStateContinuous():
-            self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action)
-            self._copy_action_values_for_terminal_state(learner.getA(), terminal_state, action)
+        if False:
+            # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions
+            # because they are all equivalent (they all lead to the same set of next states, which is always the same state if the environment has only one start state).
+
+            # Copy the action and advantage value just learned to the value associated to the other possible actions that could have been taken at this terminal state
+            # TO-DO: (2024/08/23) If it becomes necessary, we could implement the copy of Q(s,a) for the case of continuous-state environments by performing all possible actions on the same continuous-valued state visited when `done` and learning from those actions (i.e. calling learner.learn())
+            # Note that in principle, this copy operation IS necessary because, when learning the action value of the state just BEFORE visiting a terminal state,
+            # the average of Q(s,a) over all actions at the next state (i.e. the terminal state in this case) is used in the computation of the TD error (see LeaTD._compute_deltas()).
+            if not self.env.isStateContinuous():
+                self._copy_action_values_for_terminal_state(learner.getQ(), terminal_state, action)
+                self._copy_action_values_for_terminal_state(learner.getA(), terminal_state, action)
 
     def _copy_action_values_for_terminal_state(self, QA, state, action):
         """

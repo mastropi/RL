@@ -237,6 +237,13 @@ def log_file_close(fh_log, stdout_sys, stderr_sys, dt_open):
     return dt_close, time_elapsed
 
 
+def create_random_number_generator(seed=None):
+    "Returns an object that can be used to generate random numbers on a stream independent of other calls to random value generators from np.random"
+    np_random = np.random.RandomState()
+    np_random.seed(seed)
+    return np_random
+
+
 def is_integer(x):
     "Returns whether the input parameter is an integer (i.e. either int, np.int32, np.int64)"
     return isinstance(x, (int, np.int32, np.int64))

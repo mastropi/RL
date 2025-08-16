@@ -205,7 +205,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                             -0.12797619,  0.16286081,
                                             -0.19404762,  0.55227267,
                                              0.        ,  0.67405153,
-                                            -0.25618422, -0.25618422]],
+                                            -0.29073987, -0.23026747]],
                                      'C': [10, 11, 9, 8, 8]
                                      },
                                 # DM-2025/01/14: This is one case where the simulation ends at a start state (s=0) (i.e. just after transitioning from a terminal to a start state)
@@ -223,7 +223,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                             -0.12797619,  0.16286081,
                                             -0.19404762,  0.55227267,
                                              0.        ,  0.67405153,
-                                            -0.26102196, -0.26102196]],
+                                            -0.29177644, -0.23026747]],
                                      'C': [10, 11, 9, 8, 8]
                                      },
                                 # This case ends at state s = 3 (0-based index)
@@ -232,7 +232,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                             -0.12797619,  0.17611824,
                                             -0.19404762,  0.54647998,
                                              0.        ,  0.67405153,
-                                            -0.26102196, -0.26102196]],
+                                            -0.29177644, -0.23026747]],
                                      'C': [11, 12, 10, 9, 8]
                                      },
                                 50: {'V': [-0.11578753,  0.12543584,  0.47242722,  0.66194192, -0.26102196],
@@ -240,7 +240,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                             -0.12797619,  0.17611824,
                                             -0.19404762,  0.54647998,
                                              0.        ,  0.66194192,
-                                            -0.26102196, -0.26102196]],
+                                            -0.29177644, -0.23026747]],
                                      'C': [11, 12, 10, 9, 9]
                                      },
                                 # This is another case where the simulation ends at a start state (s=0) (i.e. just after transitioning from a terminal to a start state)
@@ -251,7 +251,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                             -0.12797619,  0.17611824,
                                             -0.19404762,  0.54647998,
                                              0.        ,  0.66194192,
-                                            -0.26449264, -0.26449264]],
+                                            -0.29177644, -0.2426656]],
                                      'C': [11, 12, 10, 9, 9]
                                      },
                                 52: {'V': [-0.11039147,  0.12543584,  0.47242722,  0.66194192, -0.26449264],
@@ -259,7 +259,7 @@ class Test_Class_Simulator(unittest.TestCase):
                                             -0.12797619,  0.17611824,
                                             -0.19404762,  0.54647998,
                                              0.        ,  0.66194192,
-                                            -0.26449264, -0.26449264]],
+                                            -0.29177644, -0.2426656]],
                                      'C': [12, 13, 10, 9, 9]
                                      }
                                 })
