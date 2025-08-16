@@ -295,7 +295,7 @@ def plot_trajectory(env, trajectory, params_exec, ax=None, style=".-", figsize=(
 
     return ax
 
-def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=None, trajectory_length=1000, seed=None, verbose=False, verbose_period=1, plot_absorption_set=True):
+def plot_state_counts(dict_simulator, learning_method, rep, params_exec, trajectory=None, trajectory_length=1000, seed=None, verbose=False, verbose_period=1, plot_absorption_set=True):
     """
     trajectory_length: Length of the trajectory to generate when no `trajectory` is given.
     seed: Seed to generate the trajectory under the current policy stored in the `dict_simulator` simulator when no `trajectory` is given.
@@ -311,7 +311,7 @@ def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=N
 
     if trajectory is None:
         # Generate a trajectory under the policy stored in the learner of the simulator
-        _simulator = copy.deepcopy(dict_simulator[learning_method])
+        _simulator = copy.deepcopy(dict_simulator[learning_method][rep])
         _learner_under_policy, _nsteps, _average_reward = _simulator.run_exploration(max_time_steps=trajectory_length, epsilon_random_action=epsilon_random_action, seed=seed, verbose=verbose, verbose_period=verbose_period)
         trajectory = np.array(_learner_under_policy.getStates())
         # Generate the 1D array containing the state counts for each state index
@@ -320,26 +320,26 @@ def plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=N
         state_counts = _learner_under_policy.getStateCountsFromTrajectory()
     else:
         # Distribution of state counts in the given trajectory
-        state_counts = np.zeros(dict_simulator[learning_method].getEnv().getNumStates(), dtype=int)
+        state_counts = np.zeros(dict_simulator[learning_method][rep].getEnv().getNumStates(), dtype=int)
         _visited_states = pd.Series(trajectory).value_counts()
         for s, c in _visited_states.items():
             state_counts[s] = c
 
     # Show the state counts as an image
-    ax, img = dict_simulator[learning_method].getEnv().plot_values(state_counts, cmap="Blues")
+    ax, img = dict_simulator[learning_method][rep].getEnv().plot_values(state_counts, cmap="Blues")
     if env_type == Environment.MountainCar:
         # Add the trajectory of the last replication
         assert T <= len(trajectory)
         trajectory2plot = trajectory[:T]
-        dict_simulator[learning_method].getEnv().plot_points(trajectory2plot, ax=ax, is_trajectory=True)
+        dict_simulator[learning_method][rep].getEnv().plot_points(trajectory2plot, ax=ax, is_trajectory=True)
 
     if learning_method_type == "values_fv" and plot_absorption_set:
         # Plot the final absorption set
-        dict_simulator[learning_method].getEnv().plot_points(np.array(list(dict_simulator[learning_method].getAgent().getLearner().getAbsorptionSet())), ax=ax, color="red", markersize=5, style="x")
+        dict_simulator[learning_method][rep].getEnv().plot_points(np.array(list(dict_simulator[learning_method][rep].getAgent().getLearner().getAbsorptionSet())), ax=ax, color="red", markersize=5, style="x")
 
     # Add the count labels
-    dict_simulator[learning_method]._add_count_labels(ax, state_counts, factor_fontsize=3.0)
-    plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {dict_simulator[learning_method].getEnv().getShape()}"
+    dict_simulator[learning_method][rep]._add_count_labels(ax, state_counts, factor_fontsize=3.0)
+    plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion - {env_type.name} {dict_simulator[learning_method][rep].getEnv().getShape()} - Replication {rep}"
                  f"\nN={N}, T={T}, wind_dict={wind_dict}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
                  f"\nDistribution of state counts by a trajectory that follows the last learned policy AND final absorption set A")
 
@@ -619,7 +619,7 @@ if env_type == Environment.Gridworld:
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.1})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.3})    # 22-Jun-2025: Used in 8x12 gridworld
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
-        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
     else:
@@ -690,7 +690,7 @@ nn_input_policy = InputLayer.ONEHOT
 # whereas deep networks (i.e. networks whose depth increases as 1/epsilon) require polylog(1/epsilon) neurons to achieve the epsilon uniform error.
 # (2014) https://web.archive.org/web/20140721050413/http://www.heatonresearch.com/node/707, Jeff Heaton, "An introduction to neural networks for Java".
 # He indicates what is possible (via a theorem I believe?) with NN with one and with two hidden layers.
-nn_hidden_layer_sizes = nn_hidden_layer_sizes_policy = [12]
+nn_hidden_layer_sizes = nn_hidden_layer_sizes_policy = [] #[12]
 print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes_policy)} hidden layers of sizes {nn_hidden_layer_sizes_policy}")
 #----------------------------- MODEL FOR POLICY -----------------------#
 
@@ -698,7 +698,7 @@ print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes_policy)} hidden
 #----------------------------- MODEL FOR CRITIC -----------------------#
 use_function_approximation = True
 nn_input_value_functions = InputLayer.STATE
-nn_hidden_layer_sizes_value_functions = [48] #[12]
+nn_hidden_layer_sizes_value_functions = [12] #[48] #[12]
 #----------------------------- MODEL FOR CRITIC -----------------------#
 
 
@@ -953,7 +953,7 @@ policy_learning_mode = "online" #"offline" #"online"
     ## The OFFLINE mode makes sense only when value functions are learned SEPARATELY from the policy.
 is_NPG = len(nn_hidden_layer_sizes_policy) == 0
 #*********************
-n_learning_steps = 30 #100 #30 #200 #50 #100
+n_learning_steps = 60 #100 #200 #50 #100
 #*********************
 prob_include_in_train = 1.0            # Probability of including a step of the exploration, used for the ONLINE policy learning update, in the sample that computes the loss. Goal: reduce the correlation among samples included in the training process.
 n_episodes_per_learning_step = int(50 / prob_include_in_train) #100 #30  # Number of episodes for the policy update step when learning the policy online and in NON-NPG mode
@@ -976,7 +976,7 @@ epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #
 reward_to_promote_exploration = 0.0 #1.0 #0.1 #None   # Reward for a reward shaping strategy used to promote the visit of EXIT events from A which allow the execution of the FV simulation to estimate value functions (which is crucial for the FV estimation procedure to be effective). Note that the shaped reward may be proportional to |V(s)|, not necessarily constant
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
 use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
-use_fixed_average_reward = True  # (2025/06/26) THIS SEEMS TO BE VERY IMPORTANT IN GUARANTEEING STABILITY OF FVAC LEARNING (specially in situations where the absorption set A may have states close to the finish line in the labyrinth --e.g. 6x8 RANDOM labyrinth with WIND=0.6 (seed_labyrinth = 4217, seed (simulation) = 1317)
+use_fixed_average_reward = False  # (2025/06/26) THIS SEEMS TO BE VERY IMPORTANT IN GUARANTEEING STABILITY OF FVAC LEARNING (specially in situations where the absorption set A may have states close to the finish line in the labyrinth --e.g. 6x8 RANDOM labyrinth with WIND=0.6 (seed_labyrinth = 4217, seed (simulation) = 1317)
 keep_fv_estimation_of_average_reward_and_stationary_probability_consistent = False  #True   # Use `False` when we are only interested in leveraging the reward information for policy learning as opposed to consistency of the estimation of the average reward
 learning_steps_observe = [4, 5, 6, 7] #7, 8, 19, 20] #[1, 2, 7, 8, 22, 23, 24] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
@@ -994,7 +994,7 @@ break_when_goal_reached = False  # Whether to stop the learning process when the
 seed_base = test_ac.seed
 
 # Number of replications to run on each method
-nrep = 1 #5 #9
+nrep = 5 #9
 # Logging
 log = nrep > 1  #learning_method_type == "values_fv"
 
@@ -1037,7 +1037,7 @@ simulators = dict({ # TD and TD(lambda) learners
                     'values_fvl3': test_ac.sim_fvl,
                     'values_fva': test_ac.sim_fva,
                     })
-learning_methods = ["values_fv", "values_td"]
+learning_methods = ["values_fvl"] #, "values_tdl", "values_fv", "values_td"] #["values_fv", "values_td"]
 for learning_method in learning_methods:
     print()
     print(f"********************************************************")
@@ -1082,6 +1082,7 @@ for learning_method in learning_methods:
                                                 'entry_state',
                                                 'exit_state',
                                                 'wind_dict',
+                                                'seed_obstacles',
                                                 # --- Learning
                                                 'learning_method',
                                                 'learning_task',
@@ -1128,6 +1129,7 @@ for learning_method in learning_methods:
         print(f"{param}: {value}")
 
     # Initialize objects that will contain the results by learning step
+    simulators_all = [None]*nrep  # List with the simulator objects so that we can analyze the learning process at each replication, if needed (e.g. when learning doesn't really work)
     state_counts_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()), dtype=int)
     V_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates()))
     Q_all = np.zeros((nrep, n_learning_steps, test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions()))
@@ -1226,7 +1228,7 @@ for learning_method in learning_methods:
             # Keep track of the number of learning steps in which we observe a significant change in the policy so that we can reduce the optimizer learning rate
             # when NPG is used and thus avoid very large policy updates when some learning has already happened.
             n_learning_steps_with_large_enough_KL = 0
-            if True: #plot_policy_update:
+            if not log: #plot_policy_update:
                 # Initialize the plot of the policy at each policy learning step
                 # NOTE: The plot of the absorption set only makes sense for the FIRST REPLICATION because at this point the absorption set has not been re-estimated
                 # (the estimation is done at the beginning of the FV process).
@@ -1527,11 +1529,13 @@ for learning_method in learning_methods:
                     # in __copy__ TransformNode instances can not be copied. "
                     # "NotImplementedError: TransformNode instances can not be copied. Consider using frozen() instead."
                     _simulator = copy.deepcopy(simulator_value_functions)   # We create a copy because we don't want to change the learner object in the simulator eventually used above (e.g. the state counts that are plotted below)
+                    simulators_all[rep] = _simulator    # Note that, when `_simulator is re-created at the next iteration with the above assignment, the value of `simulators[rep]` stays INTACT (just tested with dummy lists)
                 except:
                     print("WARNING: The `simulator_value_functions` object could NOT be DEEPCOPied. "
                           "This means that the online exploration after the value functions have been learned will override the trajectory stored in the value function's learner. "
                           "This might affect trajectory plots which might show unexpected results.")
                     _simulator = simulator_value_functions
+                    simulators_all[rep] = _simulator  # In this case the list will contain only the simulator object of the last replication repeated nrep times, unfortunately
                 # Generate a trajectory for the current policy, so that we always have a trajectory to plot,
                 # regardless of whether we learn the policy via NPG (in which case no trajectory is generated to learn the policy)
                 # or whether we learn the policy via regular policy gradient (in which case a trajectory is generated when updating the policy by the learner_ac.learn() call above).
@@ -1570,6 +1574,53 @@ for learning_method in learning_methods:
         time_elapsed_all[rep] = time_elapsed_rep
         time_cpu_all[rep] = time_cpu_rep
 
+        #------------------ Plots -----------------
+        if not plot_policy_update:
+            # Show the final policy
+            plot_policy(test_ac.getEnv(), learner_ac.getPolicy(), R_all[rep, t_learn], state_counts_all[rep, :t_learn + 1, :], params_exec,
+                        is_problem_2d=problem_2d,
+                        KL_distance=KL_all[rep, t_learn], KL_distance_norm=KL_norm_all[rep, t_learn],
+                        absorption_set=simulator_value_functions.getAgent().getLearner().getAbsorptionSet() if learning_method_type == "values_fv" else None,
+                        t_learn=t_learn + 1, verbose=False)
+
+        # Plot loss and average reward for the current replication
+        print("\nPlotting...")
+        ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
+        ax_loss.plot(np.arange(1, n_learning_steps+1), loss_all[rep, :n_learning_steps], marker='.', color="red")
+        #ax_loss.plot(range(1, n_learning_steps+1), alpha_all[rep, :n_learning_steps], '--', color="cyan")
+        ax_loss.set_xlabel("Learning step")
+        ax_loss.set_ylabel("Loss", color="red")
+        #ax_loss.axhline(0, color="red", linewidth=1, linestyle='dashed')
+        ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
+        #ax_loss.legend(["Loss", "alpha0"], loc='upper left')
+        ax_R = ax_loss.twinx()
+        legend_R = []
+        if policy_learning_mode == "online":
+            # We learn the policy by doing a final excursion using the current policy and computing the loss
+            # => Plot the episodic average reward observed during the ONLINE Actor-Critic excursion
+            ax_R.plot(np.arange(1, n_learning_steps+1), R_all[rep, :n_learning_steps], marker='.', color="green")
+            legend_R += ["Average reward (episodic) (AFTER updating policy)"]
+            if not np.isnan(max_avg_reward_episodic):
+                ax_R.axhline(max_avg_reward_episodic, color="green", linewidth=1)
+                legend_R += ["Max. average reward (episodic)"]
+        ax_R.plot(np.arange(1, n_learning_steps+1), R_long_all[rep, :n_learning_steps], marker='.', color="greenyellow")
+        legend_R += ["Long-run average reward estimated by value functions learner (BEFORE updating policy)"]
+        if not np.isnan(max_avg_reward_continuing):
+            ax_R.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
+            legend_R += ["Max. average reward (continuing)"]
+        ax_R.set_ylabel("Average reward", color="green")
+        # For now I have eliminated the plot of the K-L divergence between consecutive learning steps to avoid cluttering
+        ax_R.plot(np.arange(1, n_learning_steps+1), KL_norm_all[rep, :n_learning_steps], color="blue", linewidth=1)
+        ax_R.axhline(KL_THRESHOLD, color="blue", linestyle="dashed")
+        legend_R += ["Standardized K-L divergence with previous policy", "Standardized K-L threshold for reducing learning rates"]
+        ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')  # color="green" because it refers to the average reward which is plotted in green on the RIGHT axis
+        ax_R.legend(legend_R, loc="upper right")
+        plt.title(f"{learning_method.upper()}" + f"{((' - SOFT' if soft_killing else ' - HARD') + ' killing') if learning_method_type == 'values_fv' else ''} (rep = {rep+1} of {nrep} replications)" +
+                  f"\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={simulators_all[rep].getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
+                  f"\nN={N}, T={T}, wind_dict={wind_dict}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
+                  f"\nEvolution of the LOSS (left, red) and Average Reward (right, green) with the learning step")
+        #------------------ Plots -----------------
+
     time_end = timer()
     cpu_end = process_time()
     time_elapsed = time_end - time_start
@@ -1577,13 +1628,11 @@ for learning_method in learning_methods:
 
     if log:
         log_file_close(fh_log, stdout_sys, stderr_sys, dt_start)
-    else:
-        show_elapsed_time(learning_method, time_elapsed, time_cpu)
-
+    show_elapsed_time(learning_method, time_elapsed, time_cpu)
 
     ############# Store the measures that we would like to compare
     dict_test_ac[learning_method] = test_ac
-    dict_simulator[learning_method] = simulator_value_functions
+    dict_simulator[learning_method] = simulators_all.copy()
     dict_loss[learning_method] = loss_all.copy()
     dict_R[learning_method] = R_all.copy()
     dict_R_long[learning_method] = R_long_all.copy()
@@ -1604,73 +1653,9 @@ for learning_method in learning_methods:
     ############# Store the measures that we would like to compare
 
 
-
     #------------------ Plots -----------------
-    if not plot_policy_update:
-        _average_reward_at_last_policy_learning_step = dict_R[learning_method][nrep-1][-1]
-        _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
-        axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(),
-                           _average_reward_at_last_policy_learning_step,
-                           _state_counts_during_policy_learning,
-                           params_exec,
-                           is_problem_2d=problem_2d,
-                           absorption_set=simulator_value_functions.getAgent().getLearner().getAbsorptionSet() if learning_method_type == "values_fv" else None,
-                           t_learn=n_learning_steps, fontsize=14, verbose=test_ac.getEnv().getNumStates() <= 50)
-    show_elapsed_time(learning_method, time_elapsed, time_cpu)
-
-    #raise KeyboardInterrupt
-
-
-    # Plot loss and average reward for the currently analyzed learner
-    print("\nPlotting...")
-    ax_loss = plt.figure(figsize=figsize).subplots(1, 1)
-    ax_loss.plot(np.arange(1, n_learning_steps+1), dict_loss[learning_method][rep, :n_learning_steps], marker='.', color="red")
-    #ax_loss.plot(range(1, n_learning_steps+1), dict_alpha[learning_method][rep, :n_learning_steps], '--', color="cyan")
-    ax_loss.set_xlabel("Learning step")
-    ax_loss.set_ylabel("Loss", color="red")
-    #ax_loss.axhline(0, color="red", linewidth=1, linestyle='dashed')
-    ax_loss.xaxis.set_major_locator(MaxNLocator(integer=True))
-    #ax_loss.legend(["Loss", "alpha0"], loc='upper left')
-    ax_R = ax_loss.twinx()
-    legend_R = []
-    if policy_learning_mode == "online":
-        # We learn the policy by doing a final excursion using the current policy and computing the loss
-        # => Plot the episodic average reward observed during the ONLINE Actor-Critic excursion
-        ax_R.plot(np.arange(1, n_learning_steps+1), dict_R[learning_method][rep, :n_learning_steps], marker='.', color="green")
-        legend_R += ["Average reward (episodic) (AFTER updating policy)"]
-        if not np.isnan(max_avg_reward_episodic):
-            ax_R.axhline(max_avg_reward_episodic, color="green", linewidth=1)
-            legend_R += ["Max. average reward (episodic)"]
-    ax_R.plot(np.arange(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], marker='.', color="greenyellow")
-    legend_R += ["Long-run average reward estimated by value functions learner (BEFORE updating policy)"]
-    if not np.isnan(max_avg_reward_continuing):
-        ax_R.axhline(max_avg_reward_continuing, color="greenyellow", linewidth=1)
-        legend_R += ["Max. average reward (continuing)"]
-    ax_R.set_ylabel("Average reward", color="green")
-    # For now I have eliminated the plot of the K-L divergence between consecutive learning steps to avoid cluttering
-    ax_R.plot(np.arange(1, n_learning_steps+1), dict_KL_norm[learning_method][rep, :n_learning_steps], color="blue", linewidth=1)
-    ax_R.axhline(KL_THRESHOLD, color="blue", linestyle="dashed")
-    legend_R += ["Standardized K-L divergence with previous policy", "Standardized K-L threshold for reducing learning rates"]
-    ax_R.axhline(0, color="green", linewidth=1, linestyle='dashed')  # color="green" because it refers to the average reward which is plotted in green on the RIGHT axis
-    if False:  # 2025/06/25: Removed this block because we lost view of the estimated average reward by the learner which sometimes was much much larger than the episodic reward observed by the original process!
-        # Set the Y-axis limits so that we can see better the learning curve despite possible large K-L values that could make the curve look very tiny
-        # This is particularly useful when the policy is learned fast within each Actor-Critic excursion,
-        # which for instance is achieved when computing the loss and updating parameters after each Actor-Critic episode (mini-batch)
-        # or when learning the policy with NPG.
-        if policy_learning_mode == "online":
-            ax_R.set_ylim((-np.max(dict_R[learning_method][rep, :n_learning_steps])/50, np.max(dict_R[learning_method][rep, :n_learning_steps])*1.1))
-        else:
-            ax_R.set_ylim((-np.max(dict_R_long[learning_method][rep, :n_learning_steps])/50, np.max(dict_R_long[learning_method][rep, :n_learning_steps])*1.1))
-    ax_R.legend(legend_R, loc="upper right")
-    plt.title(f"{learning_method.upper()}" + f"{((' - SOFT' if soft_killing else ' - HARD') + ' killing') if learning_method_type == 'values_fv' else ''}" +
-              f"\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={dict_simulator[learning_method].getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
-              f"\nN={N}, T={T}, wind_dict={wind_dict}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
-              f"\nEvolution of the LOSS (left, red) and Average Reward (right, green) with the learning step")
-
-    #raise KeyboardInterrupt
-
     if learning_method != "all_online": # Otherwise, `trajectory_under_policy` (used in the call below) is not defined
-        plot_state_counts(dict_simulator, learning_method, params_exec, trajectory=trajectory_under_policy, plot_absorption_set=True)
+        plot_state_counts(dict_simulator, learning_method, rep, params_exec, trajectory=trajectory_under_policy, plot_absorption_set=True)
 
     if adjust_optimizer_learning_rate:
         plt.figure()
@@ -1694,12 +1679,12 @@ if learning_method_type == "values_fv":
 if not plot_policy_update:
     _average_reward_at_last_policy_learning_step = dict_R[learning_method][nrep-1][-1]
     _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
-    axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(),
+    axes = plot_policy(dict_simulator[learning_method][rep].getEnv(), dict_simulator[learning_method][rep].getAgent().getPolicy(),
                        _average_reward_at_last_policy_learning_step,
                        _state_counts_during_policy_learning,
                        params_exec,
                        is_problem_2d=problem_2d,
-                       absorption_set=simulator_value_functions.getAgent().getLearner().getAbsorptionSet() if learning_method_type == "values_fv" else None,
+                       absorption_set=simulators_all[nrep-1].getAgent().getLearner().getAbsorptionSet() if learning_method_type == "values_fv" else None,
                        t_learn=n_learning_steps, fontsize=14, verbose=test_ac.getEnv().getNumStates() <= 50)
 show_elapsed_time(learning_method, time_elapsed, time_cpu)
 
@@ -1716,7 +1701,7 @@ if env_type == Environment.MountainCar:
     # Note that we limit the trajectory to the first 100 steps because o.w. the GIF would take too long to generate...
     # For instance, with 100 steps, the GIF takes ~2 minutes to generate and is 1 MB in size already!
     _npoints2plot = min(T, 100)
-    _simulator = copy.deepcopy(dict_simulator[learning_method])
+    _simulator = copy.deepcopy(dict_simulator[learning_method][rep])
     _learner_latest_policy, _nsteps, _average_reward = _simulator.run_exploration(t_learn=t_learn, max_time_steps=T, epsilon_random_action=epsilon_random_action, seed=seed_learn, verbose=False, verbose_period=1)
     _trajectory_under_policy = np.array(_learner_latest_policy.getStates())
     assert _npoints2plot < len(_trajectory_under_policy)
@@ -1731,14 +1716,14 @@ if env_type == Environment.MountainCar:
        _indices2plot = np.arange(T)
     trajectory2plot = _trajectory_under_policy[_indices2plot]
 
-    dict_simulator[learning_method].getEnv().plot_trajectory_gif([dict_simulator[learning_method].getEnv().getStateFromIndex(s, simulation=False) for s in trajectory2plot])
+    dict_simulator[learning_method][rep].getEnv().plot_trajectory_gif([dict_simulator[learning_method][rep].getEnv().getStateFromIndex(s, simulation=False) for s in trajectory2plot])
 
 
 #-- Plot the value functions for the state next to the terminal state
 # ONLY VALID WHEN THE EXIT STATE IS AT THE TOP RIGHT OF THE LABYRINTH
 if state_observe is not None:
     marker = ''
-    Q_all_baseline = dict_Q[learning_method][rep, :n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, :n_learning_steps, :].T, (dict_simulator[learning_method].getEnv().getNumActions(), 1, 1)).T
+    Q_all_baseline = dict_Q[learning_method][rep, :n_learning_steps, :, :] - np.tile(dict_V[learning_method][rep, :n_learning_steps, :].T, (dict_simulator[learning_method][rep].getEnv().getNumActions(), 1, 1)).T
     ax_Q, ax_Q_baseline = plt.figure().subplots(1, 2)
     ax_Q.plot(range(1, n_learning_steps + 1), dict_V[learning_method][rep, :n_learning_steps, state_observe], marker=marker, color="black")
     ax_Q.plot(range(1, n_learning_steps + 1), dict_Q[learning_method][rep, :n_learning_steps, state_observe, :], marker=marker)
@@ -1780,7 +1765,7 @@ if state_observe is not None:
     ax_Q_baseline.axhline(qvalue3 - svalue, linestyle='dashed', color="red")
     ax_Q_baseline.set_xlabel("Learning step")
     ax_Q_baseline.set_ylabel("Q values w.r.t. baseline")
-    plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={dict_simulator[learning_method].getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
+    plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={dict_simulator[learning_method][rep].getAgent().getLearner().gamma}) - {env_type.name} {env_shape}"
                  f"\nN={N}, T={T}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
                  f"\nQ(s,a) and V(s) for state previous to the terminal state under the optimal policy, i.e. s={state_observe}\nMax average reward (continuing) = {max_avg_reward_continuing}")
 
@@ -1876,7 +1861,7 @@ if env_type == Environment.MountainCar:
         pd.Series(A.reshape(-1)).describe()
 #-----------------
 
-common_axes = True
+common_axes = False
 ylim = (ymin, ymax) if common_axes else (None, None)
 marker = ''
 axes = plt.figure(figsize=(10, 9)).subplots(env_shape[0], env_shape[1], sharex=common_axes, sharey=common_axes, gridspec_kw=dict(hspace=0.1, wspace=0.1))  # See also help(plt.subplots); help(matplotlib.gridspec.GridSpec)
@@ -1921,7 +1906,7 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 #-- Final policy
 _average_reward_at_last_policy_learning_step = dict_R[learning_method][nrep - 1][-1]
 _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
-axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[learning_method].getAgent().getPolicy(),
+axes = plot_policy(dict_simulator[learning_method][rep].getEnv(), dict_simulator[learning_method][rep].getAgent().getPolicy(),
                    _average_reward_at_last_policy_learning_step,
                    _state_counts_during_policy_learning,
                    params_exec,
@@ -1929,11 +1914,11 @@ axes = plot_policy(dict_simulator[learning_method].getEnv(), dict_simulator[lear
 show_elapsed_time(learning_method, time_elapsed, time_cpu)
 
 
-plot_state_counts(dict_simulator, learning_method, params_exec, seed=seed_learn)
+plot_state_counts(dict_simulator, learning_method, rep, params_exec, seed=seed_learn)
 
 # Let's look at the trajectories of the learner (it works when constructing the learner with store_history_over_all_episodes=True)
-#print(len(dict_simulator[learning_method].getAgent().getLearner().getStates()))
-#print([len(trajectory) for trajectory in dict_simulator[learning_method].getAgent().getLearner().getStates()])
+#print(len(dict_simulator[learning_method][rep].getAgent().getLearner().getStates()))
+#print([len(trajectory) for trajectory in dict_simulator[learning_method][rep].getAgent().getLearner().getStates()])
 
 
 # Distribution of number of steps (possibly over all replications)
@@ -2131,10 +2116,13 @@ else:
 max_avg_reward = 1.0 if np.isnan(max_avg_reward) or max_avg_reward == 0.0 else max_avg_reward
 
 _exit_state_str = 'TOP' if "exit_state" in locals() and exit_state == env_shape[1] - 1 else 'BOTTOM' if "exit_state" in locals() else "(unknown)"
+_value_functions_estimation = f"NN Input {nn_input_value_functions.name}, hidden: {nn_hidden_layer_sizes_value_functions}" if use_function_approximation else "TABULAR"
 _learning_characteristics = f"\nN={'N' in locals() and N or _N}, " + \
                             f"T={'T' in locals() and T or _T}, " + \
-                            f"MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps - NN hidden layer: {nn_hidden_layer_sizes}, " + \
-                            f"Policy Learning MODE: {policy_learning_mode.upper()}"
+                            f"MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps\n" + \
+                            f"NN hidden: {nn_hidden_layer_sizes}, " + \
+                            f"Policy Learning MODE: {policy_learning_mode.upper()} - " + \
+                            f"Value functions: {_value_functions_estimation}"
 
 if "n_learning_steps" not in locals():
     n_learning_steps = len(dict_loss[list(dict_loss.keys())[0]][0])
@@ -2254,12 +2242,12 @@ if nrep > 1:
                             color=dict_colors[meth],
                             alpha=0.5)
             lines += [line]
-            legend += [f"{dict_legends[meth]} (average +/- SE)"]
+            legend += [f"{dict_legends[meth]} (average +/- SE, {np.mean(dict_nsteps[meth]):.0f} avg.#steps)"]
         if plot_median:
             # MEDIAN plot
             line = ax.plot(_xvalues, dict_stats_R[meth]['median'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker=marker_for_median, markersize=12)[0]
             lines += [line]
-            legend += [f"{dict_legends[meth]} (median)"]
+            legend += [f"{dict_legends[meth]} (median), {np.mean(dict_nsteps[meth]):.0f} avg.#steps)"]
         if plot_bands:
             # MIN/MAX plot
             line = ax.plot(_xvalues, dict_stats_R[meth]['max'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed")[0]
