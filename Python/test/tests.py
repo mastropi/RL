@@ -619,7 +619,7 @@ if env_type == Environment.Gridworld:
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.1})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.3})    # 22-Jun-2025: Used in 8x12 gridworld
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.5})
-        wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
+        #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.6})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.7})
         #wind_dict = dict({'direction': Direction2D.LEFT, 'intensity': 0.8})
     else:
@@ -697,8 +697,12 @@ print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes_policy)} hidden
 
 #----------------------------- MODEL FOR CRITIC -----------------------#
 use_function_approximation = True
-nn_input_value_functions = InputLayer.STATE
-nn_hidden_layer_sizes_value_functions = [12] #[48] #[12]
+nn_input_value_functions = InputLayer.STATE  #InputLayer.ONEHOT
+nn_hidden_layer_sizes_value_functions = [12] #[48]
+# Learning rate for value functions
+# It should NOT be too large when learning via NN using TD(lambda) as opposed to TD(0) (see comments in main section of value_functions.py)
+# Use 1.0 when using lambda = 0 and learning using the NN optimizer (e.g. Adam), o.w. use 0.1 to avoid too large updates of the value functions.
+alpha_initial = 1.0 #0.1 if use_function_approximation else 1.0
 #----------------------------- MODEL FOR CRITIC -----------------------#
 
 
@@ -751,8 +755,8 @@ if env_type == Environment.Gridworld:
                        # General learning parameters
                        learning_task=learning_task,
                        learning_criterion=learning_criterion,
-                       alpha=1.0, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
-                       alpha_min=0.1,
+                       alpha=alpha_initial, gamma=gamma, lmbda=0.7,  # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately
+                       alpha_min=alpha_initial/10,
                        reset_method_value_functions=ResetMethod.ALLZEROS,
                        # Fleming-Viot parameters
                        # Small N and T are N=50, T=1000 for the 8x12 labyrinth with corridor
@@ -790,8 +794,8 @@ elif env_type == Environment.MountainCar:
                        # General learning parameters
                        learning_task=learning_task,
                        learning_criterion=learning_criterion,
-                       alpha=1.0, gamma=gamma, lmbda=0.7, # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately nor for FV (for which lambda > 0 does not make sense)
-                       alpha_min=0.1,
+                       alpha=alpha_initial, gamma=gamma, lmbda=0.7, # lmbda parameter is ONLY used for TD(lambda), NOT for TD(0), which is created separately
+                       alpha_min=alpha_initial/10,
                        reset_method_value_functions=ResetMethod.ALLZEROS,
                        reset_value=0.0, #-1.0,
                        N=N,
@@ -953,7 +957,7 @@ policy_learning_mode = "online" #"offline" #"online"
     ## The OFFLINE mode makes sense only when value functions are learned SEPARATELY from the policy.
 is_NPG = len(nn_hidden_layer_sizes_policy) == 0
 #*********************
-n_learning_steps = 60 #100 #200 #50 #100
+n_learning_steps = 20 #100 #30 #200 #50 #100
 #*********************
 prob_include_in_train = 1.0            # Probability of including a step of the exploration, used for the ONLINE policy learning update, in the sample that computes the loss. Goal: reduce the correlation among samples included in the training process.
 n_episodes_per_learning_step = int(50 / prob_include_in_train) #100 #30  # Number of episodes for the policy update step when learning the policy online and in NON-NPG mode
@@ -969,19 +973,20 @@ adjust_optimizer_learning_rate = False; t_learn_min_to_adjust_optimizer_learning
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # 2) Parameters about VALUE FUNCTION learning (Critic)
-alpha_initial = 1.0 #simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
+# DM-2025/08/16: The alpha_initial parameter is now set when we define the value function approximation strategy
+#alpha_initial = 1.0 #simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
 #max_time_steps_per_episode = test_ac.getEnv().getNumStates()*10  # (2024/05/02) NO LONGER USED!  # This parameter is just set as a SAFEGUARD against being blocked in an episode at some state of which the agent could be liberated by restarting to a new episode (when this max number of steps is reached)
 epsilon_random_action = 0.1 #if policy_learning_mode == "online" else 0.0 #0.1 #0.05 #0.0 #0.01
 reward_to_promote_exploration = 0.0 #1.0 #0.1 #None   # Reward for a reward shaping strategy used to promote the visit of EXIT events from A which allow the execution of the FV simulation to estimate value functions (which is crucial for the FV estimation procedure to be effective). Note that the shaped reward may be proportional to |V(s)|, not necessarily constant
 use_average_max_time_steps_in_td_learner = True #learning_method == "values_td2" #True #False
 use_average_reward_from_previous_step = True #learning_method_type == "values_fv" #False #True            # Under the AVERAGE reward crtierion, whether to use the average reward estimated from the previous policy learning step as correction of the value functions (whenever it is not 0), at least as an initial estimate
-use_fixed_average_reward = False  # (2025/06/26) THIS SEEMS TO BE VERY IMPORTANT IN GUARANTEEING STABILITY OF FVAC LEARNING (specially in situations where the absorption set A may have states close to the finish line in the labyrinth --e.g. 6x8 RANDOM labyrinth with WIND=0.6 (seed_labyrinth = 4217, seed (simulation) = 1317)
+use_fixed_average_reward = False # (2025/06/26) THIS SEEMS TO BE VERY IMPORTANT IN GUARANTEEING STABILITY OF FVAC LEARNING (specially in situations where the absorption set A may have states close to the finish line in the labyrinth --e.g. 6x8 RANDOM labyrinth with WIND=0.6 (seed_labyrinth = 4217, seed (simulation) = 1317)
 keep_fv_estimation_of_average_reward_and_stationary_probability_consistent = False  #True   # Use `False` when we are only interested in leveraging the reward information for policy learning as opposed to consistency of the estimation of the average reward
-learning_steps_observe = [4, 5, 6, 7] #7, 8, 19, 20] #[1, 2, 7, 8, 22, 23, 24] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
+learning_steps_observe = [7, 8, 23, 24] #[1, 2, 7, 8, 22, 23, 24] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of the state value function and average reward estimation
-plot_policy_update = False  # Whether to plot the policy after each policy learning step update
+plot_policy_update = True  # Whether to plot the policy after each policy learning step update
 colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
 
 # A few further parameters for the policy learning process
@@ -994,7 +999,7 @@ break_when_goal_reached = False  # Whether to stop the learning process when the
 seed_base = test_ac.seed
 
 # Number of replications to run on each method
-nrep = 5 #9
+nrep = 1 #5 #9
 # Logging
 log = nrep > 1  #learning_method_type == "values_fv"
 
@@ -1037,7 +1042,7 @@ simulators = dict({ # TD and TD(lambda) learners
                     'values_fvl3': test_ac.sim_fvl,
                     'values_fva': test_ac.sim_fva,
                     })
-learning_methods = ["values_fvl"] #, "values_tdl", "values_fv", "values_td"] #["values_fv", "values_td"]
+learning_methods = ["values_fvl"] #, "values_tdl", "values_fv", "values_td"] #["values_fv"] #["values_fv", "values_td"]
 for learning_method in learning_methods:
     print()
     print(f"********************************************************")

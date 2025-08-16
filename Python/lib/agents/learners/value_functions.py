@@ -194,7 +194,7 @@ class StateValueFunctionApprox(LinearValueFunctionApprox):
         for s in self.terminal_states:
             self.setValue(s, 0.0)
 
-    def updateWeights(self, state, delta, multiplier_delta=1.0):
+    def updateWeights(self, state, delta, multiplier_delta=1.0, is_learner_td_lambda=False):
         """
         Updates the weights of the linear model using the given delta vector and given multiplier, which typically is the eligibility trace
         multiplied by the learning rate alpha, which is either a scalar or a vector the same size as the delta vector (and the eligibility trace)
@@ -208,7 +208,7 @@ class StateValueFunctionApprox(LinearValueFunctionApprox):
             return None
         return super()._getValue(state)
 
-    def getGradient(self, state, delta):
+    def getGradient(self, state, delta, is_learner_td_lambda=False):
         return self.X[:, state]
 
     #--- SETTERS
@@ -319,7 +319,7 @@ class ActionValueFunctionApprox(LinearValueFunctionApprox):
             for a in range(self.nA):
                 self.setValue(s, a, 0.0)
 
-    def updateWeights(self, state, action, delta, multiplier_delta=1.0):
+    def updateWeights(self, state, action, delta, multiplier_delta=1.0, is_learner_td_lambda=False):
         """
         Updates the weights of the linear model using the given delta vector and given multiplier, which typically is the eligibility trace
         multiplied by the learning rate alpha, which is either a scalar or a vector the same size as the delta vector (and the eligibility trace)
@@ -340,7 +340,7 @@ class ActionValueFunctionApprox(LinearValueFunctionApprox):
             return None
         return super()._getValue(self.getLinearIndex(state, action))
 
-    def getGradient(self, state, action, delta):
+    def getGradient(self, state, action, delta, is_learner_td_lambda=False):
         return self.X[:, self.getLinearIndex(state, action)]
 
     #--- SETTERS
@@ -547,7 +547,7 @@ class ValueFunctionApproxNN:
     # (2025/07/21) Taken from the ctu/aic repository (get_model_parameters())
     def getModelParameters(self):
         """
-        Returns the current neural network model parameters converted into a 1D array
+        Returns the current neural network model parameters converted into a 1D numpy array
         by following the layer order and C-like order of each layer-to-layer parameters (rows first)
         """
         # NOTE: We use `torch` methods instead of `numpy` methods to avoid the error "Numpy is not available", which happens in my Python-3.6 installation, NOT in Python-3.10...
@@ -558,12 +558,16 @@ class ValueFunctionApproxNN:
             # Use detach().float() to avoid the error "RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead."
             params = torch.concat([params, model_param.reshape(-1).cpu().detach().float()])
 
-        return params
+        # Convert the gradient to a numpy array by converting EACH value of the tensor because of the "Numpy is not available" error with Python-3.6.4, numpy-1.14.0, torch-1.10.2.
+        # This error might be solved by upgrading numpy or downgrading torch (but I don't want to go into that hassle now), as described in the link above.
+        params_numpy = np.array([float(x) for x in params], dtype=float)
+
+        return params_numpy
 
     # (2025/07/21) Taken from the ctu/aic repository (get_model_gradient())
     def getModelGradient(self):
         """
-        Returns the current gradient stored in the model parameters, i.e. the gradient for the last evaluation of the output on a given input
+        Returns the current gradient stored in the model parameters as a numpy array, i.e. the gradient for the last evaluation of the output on a given input
 
         The gradient is converted into a 1D array by following the layer order and C-like order of each layer-to-layer parameters (rows first).
         """
@@ -579,7 +583,38 @@ class ValueFunctionApproxNN:
             # Use detach().float() to avoid the error "RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead."
             gradient = torch.concat([gradient, model_param.grad.reshape(-1).cpu().detach().float()])
 
-        return gradient
+        # Convert the gradient to a numpy array by converting EACH value of the tensor because of the "Numpy is not available" error with Python-3.6.4, numpy-1.14.0, torch-1.10.2.
+        # This error might be solved by upgrading numpy or downgrading torch (but I don't want to go into that hassle now), as described in the link above.
+        gradient_numpy = np.array([float(x) for x in gradient], dtype=float)
+
+        return gradient_numpy
+
+    #-- SETTERS
+    # (2025/07/21) Taken from the ctu/aic repository (set_model_parameters())
+    def setModelParameters(self, params):
+        """
+        Sets the neural network model parameters to the values given in the 1D array `params`
+        by following the layer order and C-like order of each layer-to-layer parameters (rows first).
+        """
+        n_parameters_assigned_so_far = 0
+        for p, model_param in enumerate(self.nn_model.parameters()):
+            # Extract from the 1D `params` array the parameter values that should be assigned to the neural network parameters being processed in the current loop (`model_param`)
+            # NOTE: The weights and biases are stored separately in nn_model.parameters(). So, if a neural network has one hidden layer, there will be 4 parameter sets:
+            # 1) weights input -> hidden
+            # 2) biases hidden
+            # 3) weights hidden -> output
+            # 4) biases output
+            _n_parameters_to_process_now = np.prod(model_param.size())
+            _theta_layer = params[n_parameters_assigned_so_far:n_parameters_assigned_so_far + _n_parameters_to_process_now]
+            # WARNING: When doing the following operation, `model_param` goes from dtype=torch.float32 to dtype=torch.float64!!!
+            # Apparently using the `model_param.data` approach to set the parameter values is not recommended (search for this issue in the internet).
+            #model_param.data = torch.tensor(_theta_layer.reshape(model_param.shape), dtype=torch.float32)   # We need this dtype=torch.float32 because apparently when computing the gradient torch expects float parameters...
+            with torch.no_grad():  # This is to avoid the error message: "RuntimeError: a leaf Variable that requires grad is being used in an in-place operation."
+                # Also see: https://discuss.pytorch.org/t/how-to-assign-an-arbitrary-tensor-to-models-parameter/44082/2, answer by ptrblck in May-2019
+                model_param.copy_(torch.tensor(_theta_layer.reshape(model_param.shape)))
+            n_parameters_assigned_so_far += _n_parameters_to_process_now
+        assert n_parameters_assigned_so_far == len(params), \
+            f"All parameter values given in `params` must have been processed (#processed params={n_parameters_assigned_so_far}, #values in `params`)={len(params)}"
 
     def isTabular(self):
         return False
@@ -642,20 +677,32 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
         loss = self.loss(estimated_target_value, pred_value)
         return loss
 
-    def updateWeights(self, state, delta, multiplier_delta=1.0):
-        "Given the state, updates the weights of the neural network as alpha*delta*grad(V) (gradient descent corresponding to the mean squared error loss function)"
-        loss = self._compute_loss(state, delta)  #torch.tensor([delta**2], requires_grad=True)  # Note: computing the loss explicitly as delta**2 (valid for the MSELoss case), makes the gradient of the parameters be None!! (see comment by ptrblck at Ref: https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634)
-        # NOTE: The following assertion may fail if the learning rate of the Adam algorithm is too large (e.g. lr = 0.01 instead of the usual default of lr = 0.001)
-        #if isinstance(self.loss, torch.nn.MSELoss):
-        #     assert torch.isclose(loss, torch.tensor(delta**2))
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+    def updateWeights(self, state, delta, multiplier_delta=1.0, is_learner_td_lambda=False):
+        """
+        Given the state, updates the weights of the neural network
+
+        The update depends on the `is_learner_lambda` parameter, as follows:
+        - when True: the value function learner
+        as alpha*delta*grad(V) (gradient descent corresponding to the mean squared error loss function)
+        """
+        if is_learner_td_lambda:
+            # Use the TD(lambda) update of the model parameters because TD(lambda) cannot be mimiced by a loss function
+            params = self.getModelParameters() + multiplier_delta * delta
+            self.setModelParameters(params)
+        else:
+            # Use the NN optimizer to update the model parameters
+            loss = self._compute_loss(state, delta)  #torch.tensor([delta**2], requires_grad=True)  # Note: computing the loss explicitly as delta**2 (valid for the MSELoss case), makes the gradient of the parameters be None!! (see comment by ptrblck at Ref: https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634)
+            # NOTE: The following assertion may fail if the learning rate of the Adam algorithm is too large (e.g. lr = 0.01 instead of the usual default of lr = 0.001)
+            #if isinstance(self.loss, torch.nn.MSELoss):
+            #     assert torch.isclose(loss, torch.tensor(delta**2))
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
     #-- GETTERS
     def _getValue(self, state_simulation):
         """
-        Returns the value of a state
+        Returns the value of a state as a tensor
 
         The state is assumed to be the state representation used during simulation.
 
@@ -667,15 +714,21 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
         something that cannot usually be inferred from the environment structure.
          """
         if self.nn_model.getNumInputs() == self.nS:
-            # InputLayer.ONEHOT: One-hot input, i.e. one per state
+            # InputLayer.ONEHOT: One-hot input, i.e. one per state on the first nS neurons and one per action on the next nA neurons, and the simulation state is assumed scalar
+            assert is_scalar(state_simulation), f"The state value used in simulations must be a scalar ({state_simulation})"
             input = np.zeros(self.nS, dtype=int)
             input[state_simulation] = 1
-            state_value = self.nn_model(input.reshape(-1).astype(float))
+            state_value = self.nn_model(torch.tensor(input.astype(float)))
         elif self.nn_model.getNumInputs() == 1:
             # InputLayer.SINGLE: The state itself is the input on as many neurons as its dimension (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car, etc.)
-            state_value = self.nn_model(np.array(state_simulation).reshape(-1).astype(float))
+            assert is_scalar(state_simulation), f"The state value used in simulations must be a scalar ({state_simulation})"
+            state_value = self.nn_model(torch.tensor(np.array(state_simulation).astype(float)))
         else:
-            # InputLayer.STATE: The state input to the neural network is the actual state (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car)
+            # InputLayer.STATE: The state input to the neural network is the actual physical state (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car),
+            # STANDARDIZED by the environment size (e.g. (x/H, x/W) in the gridworld environment where H = height and W = width), and the action is the usual scalar.
+            # Note: The standardization is to avoid having to deal with tuning the learning rate...
+            # Note also that perhaps this standardization does NOT work well in the Mountain Car environment...?
+            # (because the state values (position, velocity) have nothing to do with the environment's shape!)
             # => First we need to convert the simulation state into whatever is input to the neural network, and this is defined by the environment
             #state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
             state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation) / np.array(self.env.getShape())
@@ -698,6 +751,7 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
         return state_value
 
     def getValue(self, state):
+        "Returns the value of a state as a float number"
         return self._getValue(state).item()
 
     def getValues(self):
@@ -707,43 +761,54 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
             state_values[s] = self.getValue(s)
         return state_values
 
-    def getGradient(self, state, delta):
+    def getGradient(self, state, delta, is_learner_td_lambda=False):
         """
         Returns the gradient of the output function (as a numpy array, NOT as a tensor) w.r.t. neural network weights CURRENTLY stored in the network
 
         The goal of this method is to be called by processes that do NOT deal with neural networks, but work on the numpy world.
         """
-        # TODO: (2025/07/29) Compute directly the gradient of V(s) by doing `V = self.nn_model(torch.tensor(state)); V.backward()` (recall the answer from ChatGPT)
-        # Goal: Generalize the computation of grad(V) to ANY loss, not only to the MSE loss assumed below when computing grad(V) in terms of grad(loss)!
+        if is_learner_td_lambda:
+            # Learning happens by updating the theta parameter in our learner (e.g. LeaTDLambda)
 
-        # NOTE: The following code snippet, although it would seem an intuitive way to get the gradient of the loss (i.e. we simply compute the loss and then call `loss.grad`,
-        # what more intuitive than that!) does NOT return the gradient of the loss w.r.t. the model parameters!
-        # The reason is that the `.grad` attribute of a tensor contains the gradient of the loss (I presume) w.r.t. the tensor itself.
-        # Thus, when we invoke `loss.grad` we get the gradient of the loss w.r.t. the `loss` itself!! And this is equal to 1.0.
-        # This is confirmed by the following comment by the guru of pytorch, ptrblck: https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634
-        #   # This does NOT give the gradient of the loss w.r.t. the model parameters
-        #   loss = self._compute_loss(state, action, delta)
-        #   gradient = loss.grad
-        # In order to compute the gradient of the loss w.r.t. the model parameters, we need to iterate on the model parameters and get their `.grad` attribute,
-        # as done precisely in super().getModelGradient(), invoked here.
-        # Ref: https://discuss.pytorch.org/t/how-to-print-the-computed-gradient-values-for-a-network/34179/8
+            # The following step on the optimizer, even if we don't use it update the model parameters with self.optimizer.step(), is crucial in order to avoid estimation divergence!
+            # In fact, if we don't do it, the gradient w.r.t. the output bias increases linearly to 1, 2, 3, ... because the gradient of the a single output neuron is always 1
+            # (see answer by the guru of PyTorch, ptrblck at https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634)
+            # and this value 1 is summed up to the already stored gradient (1) if no zero_grad() call is done before computing the gradient!
+            self.optimizer.zero_grad()
+            V = self._getValue(state)
+            V.backward()
+            return self.getModelGradient()
+        else:
+            # Learning happens using the NN optimizer
 
-        # We compute the loss and its gradient in order to have the gradient stored in the neural network
-        # (o.w. the very first we call this method, we would get an error in super().getModelGradient() because the `.grad` attribute of every model parameter is None)
-        loss = self._compute_loss(state, delta)
-        loss.backward()
+            # NOTE: The following code snippet, although it would seem an intuitive way to get the gradient of the loss (i.e. we simply compute the loss and then call `loss.grad`,
+            # what more intuitive than that!) does NOT return the gradient of the loss w.r.t. the model parameters!
+            # The reason is that the `.grad` attribute of a tensor contains the gradient of the loss (I presume) w.r.t. the tensor itself.
+            # Thus, when we invoke `loss.grad` we get the gradient of the loss w.r.t. the `loss` itself!! And this is equal to 1.0.
+            # This is confirmed by the following comment by the guru of pytorch, ptrblck: https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634
+            #   # This does NOT give the gradient of the loss w.r.t. the model parameters
+            #   loss = self._compute_loss(state, action, delta)
+            #   gradient = loss.grad
+            # In order to compute the gradient of the loss w.r.t. the model parameters, we need to iterate on the model parameters and get their `.grad` attribute,
+            # as done precisely in super().getModelGradient(), invoked here.
+            # Ref: https://discuss.pytorch.org/t/how-to-print-the-computed-gradient-values-for-a-network/34179/8
 
-        # Note that this call to getModelGradient() returns the gradient currently stored in the neural network, and this corresponds to the gradient evaluated at the
-        # last visited state. I cannot think of any assertion to verify that the returned gradient corresponds to the latest visited state. I've quickly searched on the internet,
-        # but nothing sensible came up, only pages where the gradient w.r.t. the input was discussed (as opposed to the gradient w.r.t. the parameters, which what is needed here).
-        loss_grad = super().getModelGradient()
-        # Note: We need to convert the gradient to a numpy array by converting EACH value of the tensor because of the "Numpy is not available" error that I get with
-        # Python-3.6.4, numpy-1.14.0, torch-1.10.2
-        # which might be solved by upgrading numpy or downgrading torch (but I don't want to go into that hassle now)
-        # Ref: https://stackoverflow.com/questions/71689095/how-to-solve-the-pytorch-runtimeerror-numpy-is-not-available-without-upgrading
-        # NOTE: This gradient calculation is ONLY valid when the loss is the MSE loss, as the relation -0.5 * grad(loss) / delta is only valid in that case.
-        gradient = np.array([float(x) for x in -0.5 * loss_grad / delta]) if delta != 0.0 else np.zeros_like(np.array([x for x in loss_grad]), dtype=float)
-        return gradient
+            # We compute the loss and its gradient in order to have the gradient stored in the neural network
+            # (o.w. the very first we call this method, we would get an error in super().getModelGradient() because the `.grad` attribute of every model parameter is None)
+            loss = self._compute_loss(state, delta)
+            loss.backward()
+
+            # Note that this call to getModelGradient() returns the gradient currently stored in the neural network, and this corresponds to the gradient evaluated at the
+            # last visited state. I cannot think of any assertion to verify that the returned gradient corresponds to the latest visited state. I've quickly searched on the internet,
+            # but nothing sensible came up, only pages where the gradient w.r.t. the input was discussed (as opposed to the gradient w.r.t. the parameters, which what is needed here).
+            loss_grad = super().getModelGradient()
+            # Note: We need to convert the gradient to a numpy array by converting EACH value of the tensor because of the "Numpy is not available" error that I get with
+            # Python-3.6.4, numpy-1.14.0, torch-1.10.2
+            # which might be solved by upgrading numpy or downgrading torch (but I don't want to go into that hassle now)
+            # Ref: https://stackoverflow.com/questions/71689095/how-to-solve-the-pytorch-runtimeerror-numpy-is-not-available-without-upgrading
+            # NOTE: This gradient calculation is ONLY valid when the loss is the MSE loss, as the relation -0.5 * grad(loss) / delta is only valid in that case.
+            gradient = np.array([float(x) for x in -0.5 * loss_grad / delta]) if delta != 0.0 else np.zeros_like(np.array([x for x in loss_grad]), dtype=float)
+            return gradient
 
 
 class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
@@ -784,19 +849,25 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
         loss = self.loss(estimated_target_value, pred_value)
         return loss
 
-    def updateWeights(self, state, action, delta, multiplier_delta=1.0):
+    def updateWeights(self, state, action, delta, multiplier_delta=1.0, is_learner_td_lambda=False):
         "Given the state and action, updates the weights of the neural network as alpha*delta*grad(V) (gradient descent corresponding to the mean squared error loss function)"
-        loss = self._compute_loss(state, action, delta)
-        # NOTE: The following assertion may fail if the learning rate of the Adam algorithm is too large (e.g. lr = 0.01 instead of the usual default of lr = 0.001)
-        #if isinstance(self.loss, torch.nn.MSELoss):
-        #    assert torch.isclose(loss, torch.tensor(delta**2))
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        if is_learner_td_lambda:
+            # Use the TD(lambda) update of the model parameters because TD(lambda) cannot be mimiced by a loss function
+            params = self.getModelParameters() + multiplier_delta * delta
+            self.setModelParameters(params)
+        else:
+            # Use the NN optimizer to update the model parameters
+            loss = self._compute_loss(state, action, delta)
+            # NOTE: The following assertion may fail if the learning rate of the Adam algorithm is too large (e.g. lr = 0.01 instead of the usual default of lr = 0.001)
+            #if isinstance(self.loss, torch.nn.MSELoss):
+            #    assert torch.isclose(loss, torch.tensor(delta**2))
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
     def _getValue(self, state_simulation, action):
         """
-        Returns the value of a state and action
+        Returns the value of a state and action as a tensor
 
         The state is assumed to be the state representation used during simulation.
 
@@ -808,22 +879,32 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
         something that cannot usually be inferred from the environment structure.
          """
         if self.nn_model.getNumInputs() == self.nS + self.nA:
-            # InputLayer.ONEHOT: One-hot input, i.e. one per state on the first nS neurons and one per action on the next nA neurons
+            # InputLayer.ONEHOT: One-hot input, i.e. one per state on the first nS neurons and one per action on the next nA neurons, and the simulation state is assumed scalar
+            assert is_scalar(state_simulation), f"The state value used in simulations must be a scalar ({state_simulation})"
             input = np.zeros(self.nS + self.nA, dtype=int)
             input[state_simulation] = 1
             input[self.nS + action] = 1
-            action_value = self.nn_model(input.reshape(-1).astype(float))
+            action_value = self.nn_model(torch.tensor(input.astype(float)))
         elif self.nn_model.getNumInputs() == 1 + 1:
-            # InputLayer.SINGLE: The state is assumed to be a scalar (1),
+            # InputLayer.SINGLE: The simulation state is assumed to be a scalar (1),
             # typically a 1D representation of the environment state in discrete-state environments or the state of a 1D continuous-state environment
-            # The action is also a scalar (+ 1), which is actually the way it is always represented (e.g. 0, 1, 2, 3)
-            action_value = self.nn_model(np.concatenate([np.array(state_simulation).reshape(-1).astype(float), np.array([action]).astype(float)]))
+            # The action is also a scalar (`+ 1` above), which is actually the way it is always represented (e.g. 0, 1, 2, 3)
+            assert is_scalar(state_simulation), f"The state value used in simulations must be a scalar ({state_simulation})"
+
+            # Standardize the action to [0, 1] so that we do not bother too much about tuning the learning rate (since usually they are designed for inputs smaller than 1 in absolute value)
+            action = action / self.env.getNumActions()
+
+            # Compute the action value
+            action_value = self.nn_model(torch.tensor(np.concatenate([np.array(state_simulation).astype(float), np.array([action]).astype(float)])))
         else:
-            # InputLayer.STATE: The state input to the neural network is the actual state (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car), and the action is the usual scalar
+            # InputLayer.STATE: The state input to the neural network is the actual physical state (e.g. (x, y) for 2D gridworld (x, v) for Mountain Car),
+            # STANDARDIZED by the environment size (e.g. (x/H, x/W) in the gridworld environment where H = height and W = width), and the action is the usual scalar.
+            # Note: The standardization is to avoid having to deal with tuning the learning rate...
+            # Note also that perhaps this standardization does NOT work well in the Mountain Car environment...?
+            # (because the state values (position, velocity) have nothing to do with the environment's shape!)
             # => First we need to convert the simulation state into whatever is input to the neural network, and this is defined by the environment
             #state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
             state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation) / np.array(self.env.getShape())
-            #action_value = self.nn_model(torch.tensor(np.concatenate([np.array(state_multidim).reshape(-1).astype(float), np.array([action]).astype(float)])))
 
             dim_state = len(state_multidim)
             if self.nn_model.getNumInputs() == dim_state + self.env.getNumActions():
@@ -849,6 +930,7 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
         return action_value
 
     def getValue(self, state, action):
+        "Returns the value of a state and action as a float number"
         return self._getValue(state, action).item()
 
     def getValues(self):
@@ -864,30 +946,41 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
                 action_values[s, a] = self.getValue(s, a)
         return action_values.reshape(-1)
 
-    def getGradient(self, state, action, delta):
+    def getGradient(self, state, action, delta, is_learner_td_lambda=False):
         """
         Returns the gradient of the output function (as a numpy array, NOT as a tensor) w.r.t. neural network weights CURRENTLY stored in the network
 
         The goal of this method is to be called by processes that do NOT deal with neural networks, but work on the numpy world.
         """
-        # TODO: (2025/07/29) Compute directly the gradient of Q(s,a) by doing `Q = self.nn_model(torch.tensor(state), torch.tensor(action)); Q.backward()` (recall the answer from ChatGPT)
-        # Goal: Generalize the computation of grad(Q) to ANY loss, not only to the MSE loss assumed below when computing grad(Q) in terms of grad(loss)!
+        if is_learner_td_lambda:
+            # Learning happens by updating the theta parameter in our learner (e.g. LeaTDLambda)
 
-        # We compute the loss and its gradient in order to have the gradient stored in the neural network
-        # (o.w. the very first we call this method, we would get an error in super().getModelGradient() because the `.grad` attribute of every model parameter is None)
-        loss = self._compute_loss(state, action, delta)
-        loss.backward()
+            # The following step on the optimizer, even if we don't use it update the model parameters with self.optimizer.step(), is crucial in order to avoid estimation divergence!
+            # In fact, if we don't do it, the gradient w.r.t. the output bias increases linearly to 1, 2, 3, ... because the gradient of the a single output neuron is always 1
+            # (see answer by the guru of PyTorch, ptrblck at https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634)
+            # and this value 1 is summed up to the already stored gradient (1) if no zero_grad() call is done before computing the gradient!
+            self.optimizer.zero_grad()
+            Q = self._getValue(state, action)
+            Q.backward()
+            return self.getModelGradient()
+        else:
+            # Learning happens using the NN optimizer
 
-        # Note that this call to getModelGradient() returns the gradient currently stored in the neural network, and this corresponds to the gradient evaluated at the
-        # last visited state. I cannot think of any assertion to verify that the returned gradient corresponds to the latest visited state. I've quickly searched on the internet,
-        # but nothing sensible came up, only pages where the gradient w.r.t. the input was discussed (as opposed to the gradient w.r.t. the parameters, which what is needed here).
-        loss_grad = super().getModelGradient()
-        # Note: We need to convert the gradient to a numpy array by converting EACH value of the tensor because of the "Numpy is not available" error that I get with
-        # Python-3.6.4, numpy-1.14.0, torch-1.10.2
-        # which might be solved by upgrading numpy or downgrading torch (but I don't want to go into that hassle now)
-        # Ref: https://stackoverflow.com/questions/71689095/how-to-solve-the-pytorch-runtimeerror-numpy-is-not-available-without-upgrading
-        gradient = np.array([float(x) for x in -0.5 * loss_grad / delta]) if delta != 0.0 else np.zeros_like(np.array([x for x in loss_grad]), dtype=float)
-        return gradient
+            # We compute the loss and its gradient in order to have the gradient stored in the neural network
+            # (o.w. the very first we call this method, we would get an error in super().getModelGradient() because the `.grad` attribute of every model parameter is None)
+            loss = self._compute_loss(state, action, delta)
+            loss.backward()
+
+            # Note that this call to getModelGradient() returns the gradient currently stored in the neural network, and this corresponds to the gradient evaluated at the
+            # last visited state. I cannot think of any assertion to verify that the returned gradient corresponds to the latest visited state. I've quickly searched on the internet,
+            # but nothing sensible came up, only pages where the gradient w.r.t. the input was discussed (as opposed to the gradient w.r.t. the parameters, which what is needed here).
+            loss_grad = super().getModelGradient()
+            # Note: We need to convert the gradient to a numpy array by converting EACH value of the tensor because of the "Numpy is not available" error that I get with
+            # Python-3.6.4, numpy-1.14.0, torch-1.10.2
+            # which might be solved by upgrading numpy or downgrading torch (but I don't want to go into that hassle now)
+            # Ref: https://stackoverflow.com/questions/71689095/how-to-solve-the-pytorch-runtimeerror-numpy-is-not-available-without-upgrading
+            gradient = np.array([float(x) for x in -0.5 * loss_grad / delta]) if delta != 0.0 else np.zeros_like(np.array([x for x in loss_grad]), dtype=float)
+            return gradient
 
 
 if __name__ == "__main__":
@@ -954,6 +1047,7 @@ if __name__ == "__main__":
 
         # Value function learner characteristics
         use_neural_network = True
+        learner_type = "td" #"fv"
         lr = 1E-3
         nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
         nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
@@ -964,6 +1058,9 @@ if __name__ == "__main__":
         # - # hidden layers: 1 (adding new layers rarely improves performance)
         # - [NOT TRUE] size of hidden layer: average between number of input and number of output neurons
         #   --> I've tried using this (in my case it boiled down to 2 neurons, when nn_input = InputLayer.STATE)
+        # (2025/08/04) In my case:
+        # a) when using more neurons in hidden layer (e.g. 48 instead of 12), the estimation of V(s) becomes more curved... but actually NOT better...
+        # b) when using more hidden layers, it seems there is a vanishing gradient problem because the value function V(s) is hardly updated, even with larger alpha = 10!
         nn_hidden_layer_sizes_V = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_V, 1])))]
         nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
         dict_function_approximations = None
@@ -973,7 +1070,7 @@ if __name__ == "__main__":
                                                  #'A': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
                                                  })
 
-        # Policy characteristics
+        # Policy characteristics (the policy model is currently not used because no policy learning takes place, only value functions learning)
         nn_hidden_layer_sizes_P = [12]
         nn_model = NNBackprop(1, nn_hidden_layer_sizes_P, env2d.getNumActions(), dict_activation_functions=dict({'hidden': [torch.nn.ReLU]*len(nn_hidden_layer_sizes_P)}))
         policy_nn = PolNN(env2d, nn_model, seed=seed)
@@ -986,25 +1083,52 @@ if __name__ == "__main__":
         policy_probabilities = policy_nn.get_policy_values()
         print(policy_probabilities)
 
-        # Learner (TD)
-        # Note: the simulation run below to learn value functions assumes a CONTINUING learning task
+        #-- Value function learners
         learning_task = LearningTask.CONTINUING
         learning_criterion = LearningCriterion.AVERAGE
         gamma = 1.0
         lmbda = 0.0
+        # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
+        # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
+        # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
+        alpha_ini = 1.0 #1.0 if not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
+        print(f"Initial alpha = {alpha_ini}, but alpha >= {alpha_ini/10}")
+
+        # Learner (TD)
         learner_td = td.LeaTDLambda( env2d,
                                      dict_function_approximations=dict_function_approximations,
                                      task=learning_task,
                                      criterion=learning_criterion,
                                      gamma=gamma,
                                      lmbda=lmbda,
-                                     alpha=1.0,
-                                     adjust_alpha=not use_neural_network,  # We should NOT adjust the learning rate when using neural networks because the learning rate is defined by the NN optimizer (e.g. Adam)
+                                     alpha=alpha_ini,
+                                     adjust_alpha=True, #not use_neural_network,  # We should NOT adjust the learning rate when using neural networks because the learning rate is defined by the NN optimizer (e.g. Adam)
                                      adjust_alpha_by_episode=False,
-                                     alpha_min=0.1,
+                                     alpha_min=alpha_ini/10,
                                      debug=False)
         agent_td = agents.GenericAgent(policy_nn, learner_td)
         sim_td = Simulator(env2d, agent_td, debug=debug)
+
+        # Learner FV
+        N = 50
+        T = 500
+        learner_fv = fv.LeaFV(  env2d,
+                                N, T, set(), None,
+                                states_of_interest=None,
+                                probas_stationary_start_state_et=None,
+                                probas_stationary_start_state_fv=None,
+                                dict_function_approximations=dict_function_approximations,
+                                criterion=learning_criterion,
+                                task=learning_task,
+                                gamma=gamma,
+                                lmbda=lmbda,
+                                alpha=alpha_ini,
+                                adjust_alpha=True, #not use_neural_network, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                                adjust_alpha_by_episode=False,
+                                alpha_min=alpha_ini/10,
+                                debug=False)
+        agent_fv = agents.GenericAgent(policy_nn, learner_fv)
+        sim_fv = Simulator(env2d, agent_fv, debug=debug)
 
         # Compute the true state value function so that we can analyze the quality of the estimated value function and we store it in the environment so that we can use it in plots
         V_true, _ = computing.compute_state_value_function_from_environment_and_policy( env2d, policy_nn, gamma=gamma,
@@ -1015,14 +1139,18 @@ if __name__ == "__main__":
             V_true[s] = np.nan
         env2d.setV(V_true)
 
-        # Monte-Carlo simulation
-        T = 1000
-        #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
-        sim_td._run_single_continuing_task(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=True)
-
-        # Plot
-        test_utils.plot_estimated_state_value_function(env2d, sim_td.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_td.getAgent().getLearner().getStateCounts(), alphas=sim_td.getAgent().getLearner().getAlphasByState())
-        plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: TD, $\lambda$ = {lmbda}, T = {T}")
+        # Simulation
+        if learner_type == "fv":
+            sim_fv._run_fv(0, max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False, seed=seed, verbose=debug, verbose_period=T // 20, plot=True)
+            # Plot
+            test_utils.plot_estimated_state_value_function(env2d, sim_fv.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_fv.getAgent().getLearner().getStateCounts(), alphas=sim_fv.getAgent().getLearner().getAlphasByState())
+        else:
+            T = 500 #1000
+            #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
+            sim_td._run_single_continuing_task(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=False)
+            # Plot
+            test_utils.plot_estimated_state_value_function(env2d, sim_td.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_td.getAgent().getLearner().getStateCounts(), alphas=sim_td.getAgent().getLearner().getAlphasByState())
+        plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T}")
 
     elif env_type == Environment.MountainCar:
         # NOTE: (2025/07/09) Use discrete_state=True in order to test the trickier case where the physical state (x, v) and the simulation state (1D index) are NOT the same

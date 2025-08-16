@@ -200,11 +200,15 @@ class Simulator:
             print("------> {}".format(self.results_file))
 
     def run(self, **kwargs):
-        # Put the LEARNER of value functions in training mode when the value functions are approximated by a neural network (so far, done in the continuous state case)
-        # This is important in case the neural network model has dropout layers, so that the dropout is actually used
-        if self.env.isStateContinuous():
+        # Put the LEARNER of value functions in training mode when the value functions are NOT tabular but approximated by a neural network
+        # (which is actually what is assumed when non-tabular learning is performed).
+        # This is important in case the neural network model has dropout layers, so that the dropout is actually used.
+        if not self.agent.getLearner().getV().isTabular():
             self.agent.getLearner().getV().getModel().train()
+        if not self.agent.getLearner().getQ().isTabular():
             self.agent.getLearner().getQ().getModel().train()
+        if not self.agent.getLearner().getA().isTabular():
+            self.agent.getLearner().getA().getModel().train()
 
         # Set the POLICY in evaluation mode (e.g. this is the time to compute the Critic of a policy, where the policy is evaluated, NOT trained)
         if isinstance(self.agent.getPolicy(), PolNN):
@@ -687,7 +691,7 @@ class Simulator:
                 _set_of_frequent_states_with_zero_reward = compute_set_of_frequent_states_with_zero_reward(_state_indices, _learner.getRewards(), threshold=dict_params_simul['threshold_absorption_set'])
                 # 2024/10/23: Use this option of cumulative=False to reproduce the result presented in the EWRL-2024 POSTER on the LABYRINTH results where the absorption set is defined on NON-CUMULATIVE relative frequency
                 #_set_of_frequent_states_with_zero_reward = compute_set_of_frequent_states_with_zero_reward(_state_indices, _learner.getRewards(), threshold=dict_params_simul['threshold_absorption_set'], cumulative=False)
-                print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps:"
+                print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps\n(WARNING: relative frequencies 'f' may NOT be those used to select the states in A because they may include states with NON-ZERO reward):"
                       f"\n{pd.concat([pd.Series(dist_state_counts, name='f'), pd.Series(np.cumsum(dist_state_counts), name='F')], axis=1)}")
 
                 if dict_params_info['t_learn'] == 0:
@@ -744,7 +748,7 @@ class Simulator:
                             # For the HARD killing case, increase the simulation time for the initial exploration by the increase in the absorption set
                             # Note that we do NOT increase T for the SOFT killing case because under SOFT killing we do NOT need to observe EXIT states
                             # in order to run the FV simulation.
-                            _prop_increase_absorption_set = _number_of_new_states_in_absorption_set / _size_absorption_set_before_update
+                            _prop_increase_absorption_set = _number_of_new_states_in_absorption_set / _size_absorption_set_before_update if _size_absorption_set_before_update > 0 else +np.Inf
                             dict_params_simul = update_number_of_steps_for_expectation(dict_params_simul, increase_rate=_prop_increase_absorption_set,
                                                                                        reason=f"(due to increase of absorption set by {_prop_increase_absorption_set*100:.1f}%)")
 
@@ -1518,6 +1522,12 @@ class Simulator:
 
             # Update the trajectory stored in the learner
             learner.update_trajectory(t, state, action, reward)
+            # Update the set of known states
+            # This piece of information is used when defining the absorption set A and applying the condition on its maximum size,
+            # which is usually a threshold applied on the relative size w.r.t. the number of KNOWN states by the agent.
+            learner.updateKnownEnvironmentSet({state, next_state})
+
+            # Total reward seen so far
             total_reward += reward
 
             if show_messages(verbose, verbose_period, t):
@@ -1615,7 +1625,7 @@ class Simulator:
                 done_episode = next_state in self.env.getTerminalStates()
 
                 # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward in its iterative update formula in Learner.update_average_reward()
-                # Partially reset the learner (only trajectories are reset). See why we need to do this where we do the same thing in _run_single_continuing_task()
+                # Partially reset the learner (only trajectories are reset). See why we need to do this where we do the same thing in _run_single_continuing_task().
                 learner.reset(reset_episode=False, reset_value_functions=False, reset_average_reward=False)
 
                 # See the reasons why we set this parameter where we do the same thing in _run_single_continuing_task()
@@ -2305,7 +2315,8 @@ class Simulator:
                         # Use TD(lambda) on each particle separately, BUT using the COMMONLY estimated average reward (since we need all particles to do so)
                         info['average_reward'] = estimated_average_reward if use_fixed_average_reward else learner.getAverageReward()
                         self.learn_terminal_state_values(learners[idx_particle], t, state, action, next_state, reward, info, done_episode=next_state in self.env.getTerminalStates())
-                        # Update the trajectory stored in the base learner so that we can use it to analyze whether the absorption set A should be increased based on FV visits
+                        # Update the state trajectory stored in the base learner, so that we can compute their OVERALL (i.e. over all particles) visit count
+                        # which is used when analyzing whether the absorption set A should be increased (based on the FV visits, if requested).
                         learner._states += [state]
                         assert sum(learners[idx_particle]._state_counts_over_all_episodes) == len(learner._states)
                     else:
@@ -2348,10 +2359,8 @@ class Simulator:
                     # Use TD(lambda) on each particle separately, BUT using the COMMONLY estimated average reward (since we need all particles to do so)
                     info['average_reward'] = estimated_average_reward if use_fixed_average_reward else learner.getAverageReward()
                     learners[idx_particle].learn(t, state, action, next_state, reward, done, info)
-                    # Update the trajectory and state counts stored in the base learner
-                    # so that we can use them to analyze whether the absorption set A should be increased, based on the FV visits
-                    # We pass `'learn_from_super_class': False` because we do NOT want to learn again, as learning just happened above
-                    # with the call to learners[idx_particle].learn (notice that here we are calling the `learner` object, NOT the `learners[idx_particle]` object).
+                    # Update the state trajectory stored in the base learner, so that we can compute their OVERALL (i.e. over all particles) visit count
+                    # which is used when analyzing whether the absorption set A should be increased (based on the FV visits, if requested).
                     learner._states += [state]
                     assert sum(learners[idx_particle]._state_counts_over_all_episodes) == len(learner._states)
                 else:
@@ -4415,6 +4424,9 @@ class Simulator:
 
         # Comment this out to NOT show the plot right away in case the calling function adds a new plot to the graph generated here
         if plot:
+            # Update plots that are updated at the end of episodes (as if this were an end of episode, so that we can see the estimated value function at the end of the simulation)
+            self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95,
+                                              weights=weights, pause=pause, method_name="_run_single_continuing_task, ")
             self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_single, ")
 
         if verbose:
@@ -5130,6 +5142,9 @@ class Simulator:
             print("A = {}".format(A.reshape(self.env.getNumStates(), self.env.getNumActions())))
 
         if plot:
+            # Update plots that are updated at the end of episodes (as if this were an end of episode, so that we can see the estimated value function at the end of the simulation)
+            self._update_plots_at_episode_end(episode, nepisodes, learner, t_learn, fig_V, fig_V2, fig_RMSE_state, colors_V, state_observe, ntimes_rmse_inside_ci95,
+                                              weights=weights, pause=pause, method_name="_run_single_continuing_task, ")
             self._final_plots(learner, t_learn, fig_V, fig_C, method_name="_run_single_continuing_task, ")
 
         return  learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), RMSE, MAPE, \
@@ -5499,13 +5514,13 @@ class Simulator:
         fig_V = plt.figure()
         ax = plt.gca()
         # Plot the true state value function (to have it as a reference already) and set integer values on the horizontal axis as states are integer-valued
-        _ref_V_true, _ = self._compute_function_reference_values()
+        _ref_V_true, _ref_V = self._compute_function_reference_values()
         if self.env.getV() is not None:
             ax.plot(self.env.getAllStates(), self.env.getV() - _ref_V_true, '.-', color="blue")
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         # Plot the initial estimate of the state value function stored in the learner
         _learner_state_values = self.agent.getLearner().getV().getValues()
-        ax.plot(self.env.getAllStates(), _learner_state_values - _ref_V_true, '-', color=colors_V(0))
+        ax.plot(self.env.getAllStates(), _learner_state_values - _ref_V, '-', color=colors_V(0))
 
         # Create other figures, depending on the environment's dimension
         if self.env.getDimension() == 2:

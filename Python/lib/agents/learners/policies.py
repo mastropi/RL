@@ -1123,10 +1123,8 @@ class LeaActorCriticNN(GenericLearner):
             default: 0.50
 
         learner_value_functions_critic: (opt) Learner
-            Learner object used for learning the value functions when states are continuous.
-            it is used to obtain the approximated value of a state and of a state-action, e.g. modeled by a neural network.
-            Currently it is only used when the environment has continuous states (as per env.isStateContinuous()) and
-            use_advantage=False and parameter `action_values` is not None, to retrieve the value of a state-action using function approximation.
+            Learner object used for extracting the critic's value when the state space is continuous,
+            as in that case, the critic value CANNOT be passed by the user in an array, because the number of states is infinite!
             default: None
 
         use_advantage: (opt) bool
@@ -1161,10 +1159,14 @@ class LeaActorCriticNN(GenericLearner):
         # Set the policy model in training mode
         self.policy.getModel().train()
 
-        # In value functions approximation mode, set the model in evaluation mode
+        # When the state space is continuous, it means that:
+        # - value functions are approximated (i.e. they can never be tabular!)
+        # - the models giving their values must be set in evaluation mode
+        #   (this is important only when the model is a NN with dropout layers, so that dropout layers are dropped during evaluation --to reduce overfitting)
         if self.env.isStateContinuous():
             learner_value_functions_critic.getV().getModel().eval()
             learner_value_functions_critic.getQ().getModel().eval()
+            learner_value_functions_critic.getA().getModel().eval()
 
         if self.debug:
             print("Policy for each state and action at the current parameter value:")
@@ -1248,23 +1250,17 @@ class LeaActorCriticNN(GenericLearner):
                         self.learner_value_functions.learn(t, state, action, next_state, reward, done_episode, info)
                         advantage = self.learner_value_functions.getA().getValue(state, action)
                     else:
-                        if False and self.env.isStateContinuous():
-                            # Value functions are approximated
-                            # => *** REPLACE ANY ADVANTAGE VALUES given with a new computation based on the value functions approximation ***
-
-                            # Option 1: Compute the Advantage as reward - avg.reward + V(S(t+1)) - V(S(t))
-                            advantage = reward - expected_reward + learner_value_functions_critic.getV().getValue(next_state) - learner_value_functions_critic.getV().getValue(state)
-                            if reward != 0.0:
-                                print("***[policy] NON ZERO REWARD!! Advantage = {:.4f}".format(advantage))
-
-                            # Option 2: Compute the advantage as Q - V (but this does NOT use the average reward!!!)
-                            # THIS SHOWED TO BE MUCH WORSE THAN OPTION 1!!!! (i.e. the episodic average reward dropped to zero faster in the Mountain Car problem when learning the policy)
-                            #advantage = learner_value_functions_critic.getQ().getValue(state, action) - learner_value_functions_critic.getV().getValue(state)
+                        # The user provided a critic
+                        # => Simply read the value of the critic for the current state and action
+                        if self.env.isStateContinuous():
+                            # When the state space is continuous we need to extract the value of the critic by evaluating the Q-value function
+                            # (as the critic is NOT given as an array because the number of states is infinite!)
+                            advantage = learner_value_functions_critic.getA().getValue(state, action)
                         else:
                             # TODO: (2024/03/19) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox
                             advantage = advantage_values[self.env.getIndexFromState(state) * self.env.getNumActions() + action]
                 else:
-                    # The advantage function is not given
+                    # The advantage function is not available in the learner and it should be computed using Q(s,a) and V(s)
                     # => We compute the advantage as the difference between the action value and the state value
                     if action_values is None:
                         # The user did not provide any critic, we need to learn it now
@@ -1275,10 +1271,10 @@ class LeaActorCriticNN(GenericLearner):
                         action_value = self.learner_value_functions.getQ().getValue(state, action)
                     else:
                         # The user provided a critic
-                        # => Use it to compute the advantage function (with the hope that the updates of theta are less wiggly because these estimates do not change any more --as the policy is learned)
+                        # => Simply read the value of the critic for the current state and action
                         if self.env.isStateContinuous():
-                            # Value functions are approximated
-                            # => Compute the Advantage as reward - avg.reward + V(S(t+1)) - V(S(t))
+                            # When the state space is continuous we need to extract the value of the critic by evaluating the Q-value function
+                            # (as the critic is NOT given as an array because the number of states is infinite!)
                             action_value = learner_value_functions_critic.getQ().getValue(state, action)
                         else:
                             # TODO: (2023/11/12) Use Q, the object of type ActionValueFunctionApprox defined in value_functions.py to retrieve the action value (so that we don't need to know how the state and action are stored in the X feature matrix of ActionValueFunctionApprox

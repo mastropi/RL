@@ -38,7 +38,6 @@ class LeaTDLambda(Learner):
         - getNumStates()
         - getAllStates()
         - getTerminalStates()
-        - isStateContinuous(): returns whether is a continuous-state environment.
 
     dict_function_approximations: (opt) dict
         Dictionary containing one or all of the following keys: 'V', 'Q', 'A' defining objects representing value function approximations
@@ -347,8 +346,8 @@ class LeaTDLambda(Learner):
 
     def _updateZ(self, state, action, lmbda, delta_V=None, delta_Q=None):
         "Updates the eligibility traces used for learning V and those used for learning Q"
-        gradient_V = self.V.getGradient(state, delta_V)
-        gradient_Q = self.Q.getGradient(state, action, delta_Q)
+        gradient_V = self.V.getGradient(state, delta_V, is_learner_td_lambda=lmbda > 0)
+        gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=lmbda > 0)
 
         if gradient_V is not None:
             self._z_V = self.gamma * lmbda * self._z_V + \
@@ -407,7 +406,7 @@ class LeaTDLambda(Learner):
             #self.V.optimizer.step()
             #-- TESTING THE LEARNING PROCESS BY A NEURAL NETWORK BY PROVIDING THE TRUE FUNCTION VALUE
 
-            self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V)
+            self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V, is_learner_td_lambda=self.lmbda > 0)
 
     def _updateQ(self, delta, state, action):
         if delta != 0.0:
@@ -430,7 +429,7 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(state, action)
-            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q)
+            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q, is_learner_td_lambda=self.lmbda > 0)
 
     def _expected_next_Q(self, next_state):
         """
@@ -475,7 +474,7 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(state, action)
-            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A)
+            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A, is_learner_td_lambda=self.lmbda > 0)
 
     def _updateA_GAE(self, delta, state, action, V_new_minus_old=0.0):
         """

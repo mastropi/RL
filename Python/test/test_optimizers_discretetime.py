@@ -245,9 +245,6 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                                  gamma=cls.gamma,
                                                                  lmbda=0.0,
                                                                  alpha=cls.alpha,
-                                                                 adjust_alpha=True,
-                                                                 adjust_alpha_by_episode=False,
-                                                                 alpha_min=cls.alpha_min,
                                                                  reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
                                                                  debug=cls.debug)
             agent_for_initial_exploration = agents.GenericAgent(cls.policy_nn.copy(), cls.learner_for_initial_exploration)
