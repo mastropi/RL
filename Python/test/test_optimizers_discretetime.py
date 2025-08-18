@@ -193,7 +193,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             nn_input_Q = np.prod(env_shape) + cls.env2d.getNumActions() if nn_input_value_functions == InputLayer.ONEHOT else 2 + 1 + cls.env2d.getNumActions() if nn_input_value_functions == InputLayer.STATE else 1 + 1  # `2 + 1`: `+1` for a dummy neuron to signal terminal states
             dict_function_approximations = dict(
                 {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
-                 'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                 'Q': None, #ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  #'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
                  })
         #-- Value functions modeling
@@ -705,7 +705,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             nn_input_Q = 2 + 1 + 1  # `+1` for the dummy neuron for terminal states and `+1` for the action which has an order meaning (i.e. -1: accelerate left, 0: acceleration=0, +1: accelerate right)
             dict_function_approximations = dict(
                 {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
-                 'Q': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                 'Q': None, #ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  #'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
                  })
 

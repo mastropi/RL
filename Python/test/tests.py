@@ -1428,7 +1428,9 @@ for learning_method in learning_methods:
                 print(f"Estimated average reward by Critic learning process: {average_reward_from_critic_estimation}")
                 state_counts_all[rep, t_learn, :] = state_counts
                 V_all[rep, t_learn, :] = V
-                Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
+                if Q is not None:
+                    # The Q function may not always be estimated (for faster processing, as it is not used in learning an optimal policy --only the advantage is used which depends on V(s))
+                    Q_all[rep, t_learn, :, :] = Q.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
                 A_all[rep, t_learn, :, :] = A.reshape(test_ac.getEnv().getNumStates(), test_ac.getEnv().getNumActions())
 
                 #--- 2) ACTOR

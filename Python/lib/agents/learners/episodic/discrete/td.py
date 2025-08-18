@@ -108,8 +108,9 @@ class LeaTDLambda(Learner):
         self._z_V = np.zeros(self.V.getDimension())
         self._z_V_all = np.zeros((0, self.V.getDimension()))  # Historic information
         # Eligibility traces for learning Q
-        self._z_Q = np.zeros(self.Q.getDimension())
-        self._z_Q_all = np.zeros((0, self.Q.getDimension()))  # Historic information
+        if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
+            self._z_Q = np.zeros(self.Q.getDimension())
+            self._z_Q_all = np.zeros((0, self.Q.getDimension()))  # Historic information
         # Eligibility traces for learning A, which are ALWAYS TABULAR (for the Generalized Advantage Estimation (GAE) --Ref: https://arxiv.org/abs/1707.06347, Schulman et al. (2017))
         self._z_A = np.zeros(self.env.getNumStates() * self.env.getNumActions())
         self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))  # Historic information
@@ -140,8 +141,9 @@ class LeaTDLambda(Learner):
     def reset_traces(self):
         self._z_V[:] = 0.
         self._z_V_all = np.zeros((0, self.V.getDimension()))
-        self._z_Q[:] = 0.
-        self._z_Q_all = np.zeros((0, self.Q.getDimension()))
+        if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
+            self._z_Q[:] = 0.
+            self._z_Q_all = np.zeros((0, self.Q.getDimension()))
         self._z_A[:] = 0.
         self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
 
@@ -317,8 +319,11 @@ class LeaTDLambda(Learner):
         # This avoids having to choose a particular next action for which we would require a new parameter
         # such as the epsilon value of the epsilon-greedy next action strategy.
         delta_V = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
-        delta_Q = reward + self.gamma * self._expected_next_Q(next_state) - self.Q.getValue(state, action)
-        #delta_Q = reward + self.gamma * self._max_next_Q(next_state) - self.Q.getValue(state, action)
+        if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
+            delta_Q = reward + self.gamma * self._expected_next_Q(next_state) - self.Q.getValue(state, action)
+            #delta_Q = reward + self.gamma * self._max_next_Q(next_state) - self.Q.getValue(state, action)
+        else:
+            delta_Q = 0.0
 
         # Check whether we are learning the differential value function
         # (average reward criterion for the continuing learning task context) and adjust delta accordingly
@@ -347,18 +352,18 @@ class LeaTDLambda(Learner):
     def _updateZ(self, state, action, lmbda, delta_V=None, delta_Q=None):
         "Updates the eligibility traces used for learning V and those used for learning Q"
         gradient_V = self.V.getGradient(state, delta_V, is_learner_td_lambda=lmbda > 0)
-        gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=lmbda > 0)
-
         if gradient_V is not None:
             self._z_V = self.gamma * lmbda * self._z_V + \
                         gradient_V                                    # For every-visit TD(lambda)
                         #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
             self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
 
-        if gradient_Q is not None:
-            self._z_Q = self.gamma * lmbda * self._z_Q + \
-                        gradient_Q
-            self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
+        if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
+            gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=lmbda > 0)
+            if gradient_Q is not None:
+                self._z_Q = self.gamma * lmbda * self._z_Q + \
+                            gradient_Q
+                self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
         # Eligibility traces for GAE, the update of the advantage function using the Generalized Advantage Estimation which allows implementing TD(lambda)
         A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
@@ -409,7 +414,7 @@ class LeaTDLambda(Learner):
             self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V, is_learner_td_lambda=self.lmbda > 0)
 
     def _updateQ(self, delta, state, action):
-        if delta != 0.0:
+        if delta != 0.0 and self.Q is not None:
             # DM-2025/06/22: We now use the alpha by state-action instead of the alpha by state as alpha for the update of Q,
             # which better takes into account the number of visits to each state AND action, not only to each state.
 
@@ -664,7 +669,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
                                 # Well, at least we should reset _z_V_all and _z_Q_all because it is true that _z_V and _z_Q are computed from _gradient_V_all and _gradient_Q_all
                                 # (see the _updateZ() method below).
         self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
-        self._gradient_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
+        if self.Q is not None:
+            self._gradient_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
         self._lambdas = []
         self._lambdas_in_episode = [[] for _ in self.env.getAllStates()]
 
@@ -819,12 +825,13 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient
             # (because we need to retroactively apply the newly computed lambda to previous eligibility traces)
             gradient_V = self.V.X[:, state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
-            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)]
+            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)] if self.Q is not None else None
             # Use the following calculation of the gradient for FIRST-VISIT TD(lambda)
             # (i.e. the gradient is set to 0 if the current visit of `state` is not the first one)
             #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
             self._gradient_V_all = np.r_[self._gradient_V_all, gradient_V.reshape(1, len(gradient_V))]
-            self._gradient_Q_all = np.r_[self._gradient_Q_all, gradient_Q.reshape(1, len(gradient_Q))]
+            if gradient_Q is not None:
+                self._gradient_Q_all = np.r_[self._gradient_Q_all, gradient_Q.reshape(1, len(gradient_Q))]
 
             if self.debug and False:
                 print("Gradients:")
@@ -834,7 +841,8 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # starting with the oldest gradient.
             # Note that the trace length is the same for both V and Q,
             # as it is simply the number of rows in _gradient_V_all, which coincides with the number of rows in _gradient_Q_all.
-            assert self._gradient_V_all.shape[0] == self._gradient_Q_all.shape[0]
+            if gradient_Q is not None:
+                assert self._gradient_V_all.shape[0] == self._gradient_Q_all.shape[0]
             n_trace_length = self._gradient_V_all.shape[0]
             exponents = np.array( range(n_trace_length-1, -1, -1) ).reshape(n_trace_length, 1)
                 ## The exponents are e.g. (3, 2, 1, 0) when n_trace_length = 4
@@ -848,8 +856,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # New eligibility trace using the latest computed lambda as weight for ALL past time steps
             self._z_V = np.sum( (self.gamma * lmbda)**exponents * self._gradient_V_all, axis=0 )
             self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
-            self._z_Q = np.sum( (self.gamma * lmbda)**exponents * self._gradient_Q_all, axis=0 )
-            self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
+            if gradient_Q is not None:
+                self._z_Q = np.sum( (self.gamma * lmbda)**exponents * self._gradient_Q_all, axis=0 )
+                self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
             if self.debug and False:
                 print("Exponents: {}".format((self.gamma * lmbda)**exponents))

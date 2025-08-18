@@ -1066,7 +1066,7 @@ if __name__ == "__main__":
         dict_function_approximations = None
         if use_neural_network:
             dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V, lr=lr),
-                                                 'Q': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr),
+                                                 'Q': None, #ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr),
                                                  #'A': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
                                                  })
 
