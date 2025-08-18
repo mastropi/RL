@@ -22,19 +22,18 @@ b) COULD implement the following methods:
     - learn_pred_Q() --> prediction problem: learns the action-value function under the current policy (Q(s,a))
     - learn_ctrl_policy() --> control problem: learns the optimal policy
     - getStateCounts(first_visit) --> returns the state counts over all run episodes, optionally the first visit counts.
-    - getV() --> returns the state value function
-    - getQ() --> returns the state-action value function
-    - getA() --> returns the advantage function (for each state and action)
 """
 
 import warnings
 from enum import Enum, unique
 from collections import deque
+import copy
 
 import numpy as np
 
 from Python.lib.environments import EnvironmentDiscrete
 from Python.lib.agents.learners import GenericLearner, LearningCriterion, LearningTask, ResetMethod
+from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 
 MIN_EPISODE = 1  # Minimum episode count to start shrinking alpha
 MAX_EPISODE_FOR_ALPHA_MIN = None  # Maximum episode on which the minimum alpha value is applied, before continuing to decrease alpha again further (from the alpha value observed at the MAX_EPISODE_FOR_ALPHA_MIN episode)
@@ -48,7 +47,7 @@ class AlphaUpdateType(Enum):
 
 class Learner(GenericLearner):
     """
-    Class defining methods that are generic to ALL episodic discrete-time learners.
+    Class defining methods that are generic to ALL episodic discrete-time value function learners
 
     IMPORTANT: Before using any learner, the simulation program should call the reset() method!
     Otherwise, the simulation process will most likely fail (because variables that are
@@ -68,10 +67,105 @@ class Learner(GenericLearner):
     So the above order corresponds to showing the trajectory as the sequence:
         R(0), S(0), A(0), R(1), S(1), A(1), R(2), ...
     making R(t) be the reward received when visiting S(t).
+
+    Arguments:
+    env: EnvironmentDiscrete
+        Environment where learning takes place.
+        It should have the following methods defined:
+        - getNumStates() which returns the number of fixed states in the environment.
+        - getState() which returns the current state of the environment.
+        - getReward() which returns the reward received by the agent when visiting a state in the environment.
+
+    dict_function_approximations: (opt) dict
+        Dictionary containing one or all of the following keys: 'V', 'Q', 'A' defining objects representing value function approximations
+        for the state value function, the action value function, and the advantage function respectively.
+        default: None, in which case a tabular representation of the value functions is used
+
+    use_separate_model_for_target_V: bool
+        Whether to use a slowly updated V(s) model to compute the target value of V(s) in the bootstrap calculation of delta(V).
+        Set it to True in an attempt to make learning of V(s) more stable.
+        It is the responsibility of the caller to updated this target V(s) model (e.g. at the end of every policy learning step, once a new estimate of V(s)
+        has been obtained).
+        default: False
+
+    update_period_model_for_target_V: int
+        Period (in number of simulation steps) for the update of the target model for V(s).
+        default: 100
+
+    criterion: (opt) LearningCriterion
+        See documentation of the super class.
+        default: LearningCriterion.DISCOUNTED
+
+    task: (opt) LearningTask
+        See documentation of the super class.
+        default: LearningTask.EPISODIC
+
+    gamma: (opt) float in (0, 1]
+        Discount factor.
+        default: 1.0
+
+    alpha: (opt) positive float
+        See documentation of the super class.
+        default: 1.0
+
+    adjust_alpha: (opt) bool
+        See documentation of the super class.
+        default: False
+
+    learner_type: (opt) LearnerType *** NOT YET IMPLEMENTED BUT COULD BE A GOOD IDEA TO AVOID DEFINING THE AlphaUpdateType...? ***
+        Type of learner. E.g. LearnerType.TD, LearnerType.MC.
+
+    alpha_update_type: (opt) AlphaUpdateType
+        How alpha is updated, e.g. AlphaUpdateType.FIRST_STATE_VISIT, AlphaUpdateType.EVERY_STATE_VISIT
+        This value defines the denominator when updating alpha for each state as alpha/n, where alpha
+        is the initial learning rate (passed as parameter alpha) and n is the number of FIRST or EVERY visit
+        to the state, depending on the value of the alpha_update_type parameter.
+
+    adjust_alpha_by_episode: (opt) bool
+        Whether the learning rate alpha is adjusted by number of episodes run, as opposed to by number of visits.
+        default: False
+
+    func_adjust_alpha: (opt) callable
+        See documentation of the super class.
+        default: None
+
+    alpha_min: (opt) float
+        See documentation of the super class.
+        default: False
+
+    min_count_to_update_alpha: (opt) int
+        Minimum count of a state or state-action pair at which alpha starts to be adjusted (decreased).
+
+    min_time_to_update_alpha: (opt) int
+        Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
+
+    reset_method: (opt) ResetMethod
+        Method to use to reset the value function at the beginning of the experiment.
+        default: ResetMethod.ALLZEROS
+
+    reset_params: (opt) dict
+        Dictionary defining the parameters to use by the pseudo-random number generator to reset the value function
+        at the beginning of the experiment.
+        default: None
+
+    reset_seed: (opt) int
+        Seed to use for the random reinitialization of the value function (if reset_method so specifies it).
+        default: None
+
+    store_history_over_all_episodes: (opt) bool
+        Whether to store in the object (in the attributes of the super class) the history over ALL episodes
+        or just the history of the latest observed episode.
+        The former is useful when we need to do computations on the whole observed history, possibly
+        for learning under the average reward criterion, which is usually the case for continuing learning tasks.
+        Note also that if storing the whole history is requested, the occupied memory will be large
+        if a large number of episodes are run...
+        default: False
     """
     def __init__(self, env,
-                 criterion: LearningCriterion=LearningCriterion.DISCOUNTED,
+                 dict_function_approximations: dict = None, use_separate_model_for_target_V=False, update_period_model_for_target_V: int=100,
                  task: LearningTask=LearningTask.EPISODIC,
+                 criterion: LearningCriterion=LearningCriterion.DISCOUNTED,
+                 gamma: float=1.0,
                  alpha: float=1.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT, adjust_alpha_by_episode=False,
                  func_adjust_alpha=None,
@@ -79,80 +173,6 @@ class Learner(GenericLearner):
                  min_count_to_update_alpha=1, min_time_to_update_alpha=0,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False):
-        """
-        Parameters:
-        env: EnvironmentDiscrete
-            Environment where learning takes place.
-            It should have the following methods defined:
-            - getNumStates() which returns the number of fixed states in the environment.
-            - getState() which returns the current state of the environment.
-            - getReward() which returns the reward received by the agent when visiting a state in the environment.
-
-        criterion: (opt) LearningCriterion
-            See documentation of the super class.
-            default: LearningCriterion.DISCOUNTED
-
-        task: (opt) LearningTask
-            See documentation of the super class.
-            default: LearningTask.EPISODIC
-
-        alpha: (opt) positive float
-            See documentation of the super class.
-            default: 1.0
-
-        adjust_alpha: (opt) bool
-            See documentation of the super class.
-            default: False
-
-        learner_type: (opt) LearnerType *** NOT YET IMPLEMENTED BUT COULD BE A GOOD IDEA TO AVOID DEFINING THE AlphaUpdateType...? ***
-            Type of learner. E.g. LearnerType.TD, LearnerType.MC.
-
-        alpha_update_type: (opt) AlphaUpdateType
-            How alpha is updated, e.g. AlphaUpdateType.FIRST_STATE_VISIT, AlphaUpdateType.EVERY_STATE_VISIT
-            This value defines the denominator when updating alpha for each state as alpha/n, where alpha
-            is the initial learning rate (passed as parameter alpha) and n is the number of FIRST or EVERY visit
-            to the state, depending on the value of the alpha_update_type parameter.
-
-        adjust_alpha_by_episode: (opt) bool
-            Whether the learning rate alpha is adjusted by number of episodes run, as opposed to by number of visits.
-            default: False
-
-        func_adjust_alpha: (opt) callable
-            See documentation of the super class.
-            default: None
-
-        alpha_min: (opt) float
-            See documentation of the super class.
-            default: False
-
-        min_count_to_update_alpha: (opt) int
-            Minimum count of a state or state-action pair at which alpha starts to be adjusted (decreased).
-
-        min_time_to_update_alpha: (opt) int
-            Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
-
-        reset_method: (opt) ResetMethod
-            Method to use to reset the value function at the beginning of the experiment.
-            default: ResetMethod.ALLZEROS
-
-        reset_params: (opt) dict
-            Dictionary defining the parameters to use by the pseudo-random number generator to reset the value function
-            at the beginning of the experiment.
-            default: None
-
-        reset_seed: (opt) int
-            Seed to use for the random reinitialization of the value function (if reset_method so specifies it).
-            default: None
-
-        store_history_over_all_episodes: (opt) bool
-            Whether to store in the object (in the attributes of the super class) the history over ALL episodes
-            or just the history of the latest observed episode.
-            The former is useful when we need to do computations on the whole observed history, possibly
-            for learning under the average reward criterion, which is usually the case for continuing learning tasks.
-            Note also that if storing the whole history is requested, the occupied memory will be large
-            if a large number of episodes are run...
-            default: False
-        """
         #        if not isinstance(env, EnvironmentDiscrete):
         #            raise TypeError("The environment must be of type {} from the {} module ({})" \
         #                            .format(EnvironmentDiscrete.__name__, EnvironmentDiscrete.__module__, env.__class__))
@@ -161,6 +181,30 @@ class Learner(GenericLearner):
         #                            .format(AlphaUpdateType.__name__, AlphaUpdateType.__module__, alpha_update_type.__class__))
         super().__init__(env, criterion=criterion, task=task, alpha=alpha, adjust_alpha=adjust_alpha, func_adjust_alpha=func_adjust_alpha, alpha_min=alpha_min,
                          min_count_to_update_alpha=min_count_to_update_alpha, min_time_to_update_alpha=min_time_to_update_alpha)
+        # Value functions
+        dict_function_approximations = dict() if dict_function_approximations is None else dict_function_approximations
+        self.V_target = None    # Initialize the target V(s) model in case no model should be used for the target V(s) value when computing delta(V)
+        self.use_separate_model_for_target_V = use_separate_model_for_target_V
+        self.update_period_model_for_target_V = update_period_model_for_target_V
+        if task == LearningTask.CONTINUING:
+            # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
+            # as they have their own value too!
+            # IMPORTANT: We should NOT use e.g. `dict_function_approximations.get('V', StateValueFunctionApprox(self.env.getNumStates(), {}))`
+            # because this STILL CALLS the default argument and if the state space is too large, we get a memory error!!
+            if self.use_separate_model_for_target_V:
+                self.V_target = copy.deepcopy(dict_function_approximations['V']) if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), {})
+            self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), {})
+            self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+            self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
+        else:
+            if self.use_separate_model_for_target_V:
+                self.V_target = copy.deepcopy(dict_function_approximations['V']) if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+            self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
+            self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+            self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+        # Discount factor
+        self.gamma = gamma
+
         self.alpha_update_type = alpha_update_type
         self.adjust_alpha_by_episode = adjust_alpha_by_episode
 
@@ -279,6 +323,11 @@ class Learner(GenericLearner):
         self.alpha_mean_by_episode = deque([])
         self.average_reward_by_episode = deque([])
         self.times_at_episode_end = deque([])
+
+        self._reset_learning_rates_and_visit_counts()
+
+    def _reset_learning_rates_and_visit_counts(self):
+        "Resets the learning rates for the state and the state-action and all visit counts affecting their definition in _update_alphas()"
         del self._state_counts_over_all_episodes, self._state_counts_first_visit_over_all_episodes, self._alphas, \
             self._action_counts_over_all_episodes, self._action_counts_first_visit_over_all_episodes, self._alphas2
         self._state_counts_over_all_episodes = np.zeros(self.env.getNumStates(), dtype=int)
@@ -361,7 +410,7 @@ class Learner(GenericLearner):
 
     def reset_value_functions(self):
         """
-        Resets the value functions stored in the object.
+        Resets the value functions stored in the object
 
         The state-value, action-value, and advantage function (V, Q, A) are tried to be reset,
         which are retrieved with the getV(), getQ(), and getA() methods, respectively.
@@ -372,6 +421,14 @@ class Learner(GenericLearner):
         A warning is issued when one of the reset fails for a value function
         (either because the value function is not defined in the object, or because it is None, etc.).
         """
+        if self.use_separate_model_for_target_V:
+            try:
+                self.getV_target().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed)
+            except Exception as e:
+                warnings.warn(f"Resetting the value of the TARGET STATE value function failed. If this is needed, "
+                              f"check whether the `getV_target()` is defined in the learner class '{self.__class__.__name__}', "
+                              f"and if so, whether the reset() method is defined for the object containing the state value function.")
+                print(e)
         try:
             self.getV().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed)
         except Exception as e:
@@ -680,6 +737,20 @@ class Learner(GenericLearner):
         ax2.bar(self.env.all_states, self._state_counts_over_all_episodes, color="blue", alpha=0.3)
         plt.sca(ax)  # Go back to the primary axis
 
+    def useSeparateModelForTargetV(self):
+        "Returns whether a separate model is used to estimate the target V(s) value, in lieu of the actual V(s) model being estimated (returns False if V(s) is tabular)"
+        if self.V.isTabular():
+            # Return False for tabular representations of V(s) because the copy of the actual model to the target model uses the setModelParameters() method
+            # which is currently NOT defined for tabular V(s) functions.
+            return False
+        return self.use_separate_model_for_target_V
+
+    def updateTargetModels(self):
+        "Updates the target models when non-tabular. Currently only a target model for V(s) is implemented"
+        if self.use_separate_model_for_target_V and not self.V.isTabular():
+            self.V_target.setModelParameters(self.V.getModelParameters())
+
+    #-- Getters
     def getStateCounts(self, first_visit=False):
         "Returns the array of state counts, either the first-visit state counts or the every-visit state counts"
         if first_visit:
@@ -708,24 +779,26 @@ class Learner(GenericLearner):
     def getTimesAtWhichEachEpisodeEnded(self):
         return self.times_at_episode_end
 
+    def getTargetModelUpdatePeriod(self):
+        return self.update_period_model_for_target_V
+
+    def getV_target(self):
+        "Returns the object containing the object (usually a model) used to compute the TARGET state value function in the bootstrapped TD error estimation"
+        return self.V_target
+
     def getV(self):
         "Returns the object containing the state value function estimation"
-        # This method is not implemented because the subclass implementing the actual learner may define the state value function differently (e.g. using different attribute names)
-        # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
-        raise NotImplementedError
+        return self.V
 
     def getQ(self):
         "Returns the object containing action value function estimation"
-        # This method is not implemented because the subclass implementing the actual learner may define the action value function differently (e.g. using different attribute names)
-        # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
-        raise NotImplementedError
+        return self.Q
 
     def getA(self):
         "Returns the object containing advantage function estimation"
-        # This method is not implemented because the subclass implementing the actual learner may define the action value function differently (e.g. using different attribute names)
-        # Also, this method is required because it is called by the reset_value_functions() method defined in this class.
-        raise NotImplementedError
+        return self.A
 
+    #-- Setters
     def setSampleSizeForAverageReward(self, sample_size=None):
         """
         Sets the sample size behind the calculation of the average reward based on the information stored in the self.times_at_episode_end

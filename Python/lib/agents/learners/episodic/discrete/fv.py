@@ -77,6 +77,14 @@ class LeaFV(LeaTDLambda):
         See further details in the documentation of the class responsible to simulate Fleming-Viot (e.g. discrete.Simulator).
         default: None
 
+    task: (opt) LearningTask
+        The learning task under consideration, either CONTINUING or EPISODIC.
+        The usual setting for the Fleming-Viot learner is the CONTINUING setting.
+        However, in an attempt to extend the Fleming-Viot learner to the EPISODIC context, we started considering also the EPISODIC learning task.
+        This implementation, however, turned up to be very high-time consuming and was not practical. But still its implementation is kept, just in case
+        it becomes useful in the future, as it is a very complex implementation.
+        default: LearningTask.CONTINUING
+
     criterion: (opt) LearningCriterion
         The learning criterion to use, either AVERAGE or DISCOUNTED.
         Under the AVERAGE learning criterion, episodic learning tasks are converted to a continuing learning task,
@@ -86,14 +94,6 @@ class LeaFV(LeaTDLambda):
         the definition of the state value function proposed by Sutton (2018) on pag. 251/252
         in order to tackle the case of non-ergodic Markov chain induced by a deterministic policies).
         default: LearningCriterion.AVERAGE
-
-    task: (opt) LearningTask
-        The learning task under consideration, either CONTINUING or EPISODIC.
-        The usual setting for the Fleming-Viot learner is the CONTINUING setting.
-        However, in an attempt to extend the Fleming-Viot learner to the EPISODIC context, we started considering also the EPISODIC learning task.
-        This implementation, however, turned up to be very high-time consuming and was not practical. But still its implementation is kept, just in case
-        it becomes useful in the future, as it is a very complex implementation.
-        default: LearningTask.CONTINUING
 
     burnin_time: (opt) int or None
         Burn-in time to wait until the empirical mean estimation of Phi(t,x) is considered to have reached
@@ -118,16 +118,18 @@ class LeaFV(LeaTDLambda):
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
                  dict_function_approximations: dict=None,
-                 criterion=LearningCriterion.AVERAGE,
+                 use_separate_model_for_target_V=False,
+                 update_period_model_for_target_V: int=100,
                  task=LearningTask.CONTINUING,
+                 criterion=LearningCriterion.AVERAGE,
                  alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  burnin_time=0, TIME_RESOLUTION=1,
                  debug=False):
-        super().__init__(env, dict_function_approximations=dict_function_approximations,
-                         criterion=criterion, task=task, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
+        super().__init__(env, dict_function_approximations=dict_function_approximations, use_separate_model_for_target_V=use_separate_model_for_target_V, update_period_model_for_target_V=update_period_model_for_target_V,
+                         task=task, criterion=criterion, alpha=alpha,  gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha,
                          alpha_update_type=alpha_update_type, adjust_alpha_by_episode=adjust_alpha_by_episode,
                          alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          store_history_over_all_episodes=True,  # We set this to True because FV is a CONTINUING learning task
@@ -1471,8 +1473,10 @@ class LeaFVAdaptive(LeaFV, LeaTDLambdaAdaptive):
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
                  dict_function_approximations: dict=None,
-                 criterion=LearningCriterion.AVERAGE,
+                 use_separate_model_for_target_V=False,
+                 update_period_model_for_target_V: int=100,
                  task=LearningTask.CONTINUING,
+                 criterion=LearningCriterion.AVERAGE,
                  alpha=0.1, gamma=1.0, lmbda=0.0,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
@@ -1517,8 +1521,10 @@ class LeaFVAdaptive(LeaFV, LeaTDLambdaAdaptive):
                          probas_stationary_start_state_et,
                          probas_stationary_start_state_fv,
                          dict_function_approximations,
-                         criterion=criterion,
+                         use_separate_model_for_target_V,
+                         update_period_model_for_target_V,
                          task=task,
+                         criterion=criterion,
                          alpha=alpha, gamma=gamma, lmbda=lmbda,
                          adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,

@@ -702,6 +702,8 @@ nn_hidden_layer_sizes_value_functions = [12] #[48]
 # Learning rate for value functions
 # It should NOT be too large when learning via NN using TD(lambda) as opposed to TD(0) (see comments in main section of value_functions.py)
 # Use 1.0 when using lambda = 0 and learning using the NN optimizer (e.g. Adam), o.w. use 0.1 to avoid too large updates of the value functions.
+# NOTE that this value is RELEVANT even when we learn V(s) using the Adam optimizer,
+# because it affects the learning of the ADVANTAGE function via the TRUE GAE (Generalized Advantage Estimation), both under TD(0) learning and under TD(lambda) learning.
 alpha_initial = 1.0 #0.1 if use_function_approximation else 1.0
 #----------------------------- MODEL FOR CRITIC -----------------------#
 

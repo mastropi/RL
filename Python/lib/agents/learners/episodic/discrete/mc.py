@@ -23,7 +23,6 @@ import pandas as pd
 
 from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 
 
 @unique
@@ -44,47 +43,21 @@ class LeaMCLambda(Learner):
     Arguments:
     env: EnvironmentDiscrete
         The discrete-(state, action) environment where the learning takes place.
-
-    criterion: (opt) LearningCriterion
-        The learning criterion in terms of how observed rewards are propagated to the return G(t).
-        (e.g. average reward criterion or discounted reward criterion).
-        default: LearningCriterion.DISCOUNTED
-
-    task: (opt) LearningTask
-        The type of learning task, whether it is based on episodes or it is based on a continuing Markov process that never ends
-        (or that it ends after a pre-specified number of observed steps).
-        IMPORTANT: It is not yet clear whether the class is already prepared to deal with the CONTINUING learning task, as it was originally
-        created to deal with the DISCOUNTED learning task.
-        default: LearningTask.EPISODIC
     """
 
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  learner_type=LearnerType.MC,
                  debug=False):
-        super().__init__(env, criterion=criterion, task=task, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, task=task, criterion=criterion, alpha=alpha, gamma=gamma, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
                          store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes)
         self.debug = debug
 
-        # Attributes that MUST be presented for all MC methods
-        if task == LearningTask.CONTINUING:
-            # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
-            # as they have their own value too!
-            self.V = StateValueFunctionApprox(self.env.getNumStates(), {})
-            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
-            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
-        else:
-            self.V = StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-            self.Q = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
-            self.A = ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
-        self.gamma = gamma
-        
-        #-- Attributes specific to the current MC method
         # Type of learner, whether use the traditional MC or the lambda-return leading to the MC(Lambda) learner,
         # which should be equivalent to MC as long as all episodes reach the terminal state.
         self.learner_type = learner_type
@@ -623,26 +596,16 @@ class LeaMCLambda(Learner):
         self.A._setWeight(state, action, advantage)
     #------------------- Auxiliary function: value function udpate -------------------------------#
 
-    #-- Getters
-    def getV(self):
-        return self.V
-
-    def getQ(self):
-        return self.Q
-
-    def getA(self):
-        return self.A
-
 
 class LeaMCLambdaAdaptive(LeaMCLambda):
     
-    def __init__(self, env, criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
+    def __init__(self, env, task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.FIRST_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, criterion=criterion, task=task, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, task=task, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed, store_history_over_all_episodes=store_history_over_all_episodes,
                          debug=debug)

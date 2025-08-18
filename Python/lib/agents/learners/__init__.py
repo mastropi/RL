@@ -77,7 +77,7 @@ def identity(x):
 
 class GenericLearner:
     """
-    Class defining methods that are generic to ALL learners.
+    Class defining methods that are generic to ALL learners, both value functions and policy learners
 
     IMPORTANT: Before using any learner the simulation program should call the reset() method!
     Otherwise, the simulation process will most likely fail (because variables that are
@@ -85,58 +85,57 @@ class GenericLearner:
     In addition, the *specific* Learner constructor should NOT call the reset() method
     because the reset method would then be called twice: once when the learner is constructed
     and once prior to the first simulation.
+
+    Arguments:
+    env: gym.Env
+        Environment where learning takes place.
+        The environment needs not be "discrete" in the sense the gym package gives to "discrete", namely that there is
+        a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
+        The environment must have at least the following method defined, used here:
+        - getIndexFromState(state), which returns the 1D INDEX associated to a given PHYSICAL state of the environment, such as a 2D state
+        (e.g. 2D gridworld, mountain car, etc.).
+
+    task: (opt) LearningTask
+        Type of learning task as defined in the LearningTask enum class.
+        Typical alternatives are "episodic learning task" and "continuing learning task".
+        default: LearningTask.EPISODIC
+
+    criterion: (opt) LearningCriterion
+        The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
+        or AVERAGE, for the average reward criterion (for continuing tasks, with discount factor gamma = 1).
+        default: LearningCriterion.DISCOUNTED
+
+    alpha: (opt) positive float
+        Initial learning rate.
+        default: 1.0
+
+    adjust_alpha: (opt) bool
+        Whether alpha should be updated when the methods that are responsible for updating alpha are called.
+        default: False
+
+    func_adjust_alpha: (opt) callable
+        Function that is used on the counter of whatever KPI is used to divide the initial alpha
+        when the methods responsible for updating alpha perform the update operation.
+        Ex: `np.sqrt`, in which case alpha is updated as alpha_start / np.sqrt(n) where n is the counter of the KPI
+        default: None, in which case the identity function is applied to n when dividing alpha
+
+    min_count_to_update_alpha: (opt) int
+        Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate_by_state_action_count(s,a) method.
+        default: 0
+
+    min_time_to_update_alpha: (opt) int
+        Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
+        default: 0
     """
 
     def __init__(self, env,
-                 criterion=LearningCriterion.DISCOUNTED,
                  task=LearningTask.EPISODIC,
+                 criterion=LearningCriterion.DISCOUNTED,
                  alpha: float=1.0,
                  adjust_alpha=False,
                  func_adjust_alpha=None,
                  min_count_to_update_alpha=0, min_time_to_update_alpha=0,
                  alpha_min=0.):
-        """
-        Parameters:
-        env: gym.Env
-            Environment where learning takes place.
-            The environment needs not be "discrete" in the sense the gym package gives to "discrete", namely that there is
-            a pre-defined number of states (as is the case in the EnvironmentDiscrete environment of gym).
-            The environment must have at least the following method defined, used here:
-            - getIndexFromState(state), which returns the 1D INDEX associated to a given PHYSICAL state of the environment, such as a 2D state
-            (e.g. 2D gridworld, mountain car, etc.).
-
-        criterion: (opt) LearningCriterion
-            The criterion used to learn the value functions, either DISCOUNTED (for episodic tasks with discount factor gamma < 1)
-            or AVERAGE, for the average reward criterion (for continuing tasks, with discount factor gamma = 1).
-            default: LearningCriterion.DISCOUNTED
-
-        task: (opt) LearningTask
-            Type of learning task as defined in the LearningTask enum class.
-            Typical alternatives are "episodic learning task" and "continuing learning task".
-            default: LearningTask.EPISODIC
-
-        alpha: (opt) positive float
-            Initial learning rate.
-            default: 1.0
-
-        adjust_alpha: (opt) bool
-            Whether alpha should be updated when the methods that are responsible for updating alpha are called.
-            default: False
-
-        func_adjust_alpha: (opt) callable
-            Function that is used on the counter of whatever KPI is used to divide the initial alpha
-            when the methods responsible for updating alpha perform the update operation.
-            Ex: `np.sqrt`, in which case alpha is updated as alpha_start / np.sqrt(n) where n is the counter of the KPI
-            default: None, in which case the identity function is applied to n when dividing alpha
-
-        min_count_to_update_alpha: (opt) int
-            Minimum count of a state-action pair at which alpha starts to be updated by the update_learning_rate_by_state_action_count(s,a) method.
-            default: 0
-
-        min_time_to_update_alpha: (opt) int
-            Minimum learning time step at which alpha starts to be updated by the update_learning_rate_by_learning_epoch() method.
-            default: 0
-        """
         self.env = env
         self.criterion = criterion
         self.task = task

@@ -14,7 +14,6 @@ from matplotlib import pyplot as plt, cm
 
 from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
-from Python.lib.agents.learners.value_functions import ActionValueFunctionApprox, StateValueFunctionApprox
 
 from Python.lib.utils.basic import set_numpy_options, reset_numpy_options
 import Python.lib.utils.plotting as plotting
@@ -39,11 +38,6 @@ class LeaTDLambda(Learner):
         - getAllStates()
         - getTerminalStates()
 
-    dict_function_approximations: (opt) dict
-        Dictionary containing one or all of the following keys: 'V', 'Q', 'A' defining objects representing value function approximations
-        for the state value function, the action value function, and the advantage function respectively.
-        default: None, in which case a tabular representation of the value functions is used
-
     store_history_over_all_episodes: (opt) bool
         Whether to store in the attributes of the generic super class storing the trajectory
         (e.g. states, actions, rewards) the whole trajectory history, over all episodes.
@@ -58,14 +52,19 @@ class LeaTDLambda(Learner):
     """
 
     def __init__(self, env,
-                 dict_function_approximations: dict=None,
-                 criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
+                 dict_function_approximations: dict=None, use_separate_model_for_target_V=False, update_period_model_for_target_V: int=100,
+                 task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  debug=False):
-        super().__init__(env, criterion=criterion, task=task, alpha=alpha, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env,
+                         dict_function_approximations=dict_function_approximations,
+                         use_separate_model_for_target_V=use_separate_model_for_target_V,
+                         update_period_model_for_target_V=update_period_model_for_target_V,
+                         task=task, criterion=criterion,
+                         alpha=alpha, gamma=gamma, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
                          store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes)
@@ -84,25 +83,6 @@ class LeaTDLambda(Learner):
             # AVERAGE reward criterion => CONTINUING learning task
             raise ValueError("The EPISODIC learning task in TD learning requires the DISCOUNTED reward criterion, however the AVERAGE reward criterion was specified)")
 
-        #-- Attributes that MUST be present for all TD methods
-        # Value functions
-        dict_function_approximations = dict() if dict_function_approximations is None else dict_function_approximations
-        if task == LearningTask.CONTINUING:
-            # For continuing learning tasks, there are NO terminal states, i.e. their value should NOT be set to 0 by the learner,
-            # as they have their own value too!
-            # IMPORTANT: We should NOT use e.g. `dict_function_approximations.get('V', StateValueFunctionApprox(self.env.getNumStates(), {}))`
-            # because this STILL CALLS the default argument and if the state space is too large, we get a memory error!!
-            self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), {})
-            self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
-            self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
-        else:
-            self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
-            self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
-            self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
-        # Discount factor
-        self.gamma = gamma
-        
-        #-- Attributes specific to the current TD method
         self.lmbda = lmbda
         # Eligibility traces for learning V
         self._z_V = np.zeros(self.V.getDimension())
@@ -175,6 +155,13 @@ class LeaTDLambda(Learner):
         # (without using knowledge about the environment that the agent is not expected to know).
         # See the comment for the environment_set attribute in the GenericLearner class for a couple of use cases.
         super().updateKnownEnvironmentSet({state, next_state})
+
+        # IMPORTANT: (2025/08/18) We do NOT perform this update step here because the value of `t` is NOT always the total number of simulation steps taken so far, as t may represent the time step within the episode.
+        # Update target model if the period has been fulfilled
+        # (We use `t+1` and NOT `t` because the first learning step has t = 0 and we do NOT want to update the target model at the very beginning)
+        # Also, this allows the update of the model parameters at the end of an episode, since at that point t = -1 (see call to self.learn() in _run_single() and _run_single_continuing_task())
+        #if not self.V.isTabular() and (t + 1) % self.update_period_model_for_target_V == 0:
+        #    self.V_target.setModelParameters(self.V.getModelParameters())
 
         # Compute the delta values used for the update of each value function
         # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
@@ -318,7 +305,13 @@ class LeaTDLambda(Learner):
         # (over all possible actions) as it is done by the Expected SARSA learning of the Q function.
         # This avoids having to choose a particular next action for which we would require a new parameter
         # such as the epsilon value of the epsilon-greedy next action strategy.
-        delta_V = reward + self.gamma * self.V.getValue(next_state) - self.V.getValue(state)
+        if self.use_separate_model_for_target_V:
+            V_target_value = reward + self.gamma * self.V_target.getValue(next_state) #- np.mean(self.V_target.getValues())
+            V_value = self.V.getValue(state) #- np.mean(self.V.getValues())
+        else:
+            V_target_value = reward + self.gamma * self.V.getValue(next_state)
+            V_value = self.V.getValue(state)
+        delta_V = V_target_value - V_value
         if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
             delta_Q = reward + self.gamma * self._expected_next_Q(next_state) - self.Q.getValue(state, action)
             #delta_Q = reward + self.gamma * self._max_next_Q(next_state) - self.Q.getValue(state, action)
@@ -351,7 +344,7 @@ class LeaTDLambda(Learner):
 
     def _updateZ(self, state, action, lmbda, delta_V=None, delta_Q=None):
         "Updates the eligibility traces used for learning V and those used for learning Q"
-        gradient_V = self.V.getGradient(state, delta_V, is_learner_td_lambda=lmbda > 0)
+        gradient_V = self.V.getGradient(state, delta_V, is_learner_td_lambda=False) #lmbda > 0)
         if gradient_V is not None:
             self._z_V = self.gamma * lmbda * self._z_V + \
                         gradient_V                                    # For every-visit TD(lambda)
@@ -359,7 +352,7 @@ class LeaTDLambda(Learner):
             self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
 
         if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
-            gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=lmbda > 0)
+            gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=False) #lmbda > 0)
             if gradient_Q is not None:
                 self._z_Q = self.gamma * lmbda * self._z_Q + \
                             gradient_Q
@@ -411,7 +404,7 @@ class LeaTDLambda(Learner):
             #self.V.optimizer.step()
             #-- TESTING THE LEARNING PROCESS BY A NEURAL NETWORK BY PROVIDING THE TRUE FUNCTION VALUE
 
-            self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V, is_learner_td_lambda=self.lmbda > 0)
+            self.V.updateWeights(state, delta, multiplier_delta=_alphas * self._z_V, is_learner_td_lambda=False) #self.lmbda > 0)
 
     def _updateQ(self, delta, state, action):
         if delta != 0.0 and self.Q is not None:
@@ -434,7 +427,7 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(state, action)
-            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q, is_learner_td_lambda=self.lmbda > 0)
+            self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q, is_learner_td_lambda=False) #self.lmbda > 0)
 
     def _expected_next_Q(self, next_state):
         """
@@ -479,7 +472,7 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(state, action)
-            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A, is_learner_td_lambda=self.lmbda > 0)
+            self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A, is_learner_td_lambda=False) #self.lmbda > 0)
 
     def _updateA_GAE(self, delta, state, action, V_new_minus_old=0.0):
         """
@@ -562,30 +555,21 @@ class LeaTDLambda(Learner):
 
         return states2plot
 
-    #-- Getters
-    def getV(self):
-        return self.V
-
-    def getQ(self):
-        return self.Q
-
-    def getA(self):
-        return self.A
-
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
     def __init__(self, env,
                  dict_function_approximations=None,
-                 criterion=LearningCriterion.DISCOUNTED, task=LearningTask.EPISODIC, alpha=0.1, gamma=1.0, lmbda=0.8,
+                 use_separate_model_for_target_V=False, update_period_model_for_target_V=100,
+                 task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
                  lambda_min=0., lambda_max=0.99, adaptive_type=AdaptiveLambdaType.ATD,
                  reset_method=ResetMethod.ALLZEROS, reset_params=None, reset_seed=None,
                  store_history_over_all_episodes=False,
                  burnin=False, plotwhat="boxplots", fontsize=15, debug=False):
-        super().__init__(env, dict_function_approximations=dict_function_approximations,
-                         criterion=criterion, task=task, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
+        super().__init__(env, dict_function_approximations=dict_function_approximations, use_separate_model_for_target_V=use_separate_model_for_target_V, update_period_model_for_target_V=update_period_model_for_target_V,
+                         task=task, criterion=criterion, alpha=alpha, gamma=gamma, lmbda=lmbda, adjust_alpha=adjust_alpha, alpha_update_type=alpha_update_type,
                          adjust_alpha_by_episode=adjust_alpha_by_episode, alpha_min=alpha_min, func_adjust_alpha=func_adjust_alpha,
                          reset_method=reset_method, reset_params=reset_params, reset_seed=reset_seed,
                          store_history_over_all_episodes=True if task == LearningTask.CONTINUING else store_history_over_all_episodes,

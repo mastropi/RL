@@ -203,6 +203,8 @@ class Simulator:
         # Put the LEARNER of value functions in training mode when the value functions are NOT tabular but approximated by a neural network
         # (which is actually what is assumed when non-tabular learning is performed).
         # This is important in case the neural network model has dropout layers, so that the dropout is actually used.
+        if self.agent.getLearner().getV_target() is not None and not self.agent.getLearner().getV_target().isTabular():
+            self.agent.getLearner().getV_target().getModel().eval()
         if not self.agent.getLearner().getV().isTabular():
             self.agent.getLearner().getV().getModel().train()
         if self.agent.getLearner().getQ() is not None and not self.agent.getLearner().getQ().isTabular():
@@ -216,14 +218,18 @@ class Simulator:
 
         # Run the simulation and learning process
         if isinstance(self.agent.getLearner(), LeaFV):
-            return self._run_fv(**kwargs)
+            output = self._run_fv(**kwargs)
         else:
             if self.agent.getLearner().getLearningTask() == LearningTask.CONTINUING:
                 kwargs['nepisodes'] = 1
-                return self._run_single_continuing_task(**kwargs)
+                output = self._run_single_continuing_task(**kwargs)
             else:
                 kwargs = keep_dict_params_defined_in_function(kwargs, self._run_single)
-                return self._run_single(**kwargs)
+                output = self._run_single(**kwargs)
+
+        self.agent.getLearner().updateTargetModels()
+
+        return output
 
     def _run_fv(self, t_learn=-1, max_time_steps=None,
                 max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=1.0, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
@@ -993,6 +999,9 @@ class Simulator:
             # Increase the number of steps taken during the initial exploration
             n_events_et += learning_info['nsteps']
 
+            # Update target models if defined (so that we start the FV simulation with an updated information about the current estimate of V(s))
+            self.agent.getLearner().updateTargetModels()
+
             # Update the sample size behind the calculation of the average reward
             # Note that we distinguish between the VERY FIRST iteration of this INI exploration (n_initial_exploration_run = 1)
             # and further iterations (which are run under the HARD killing case only when NO EXIT states from A are observed during the first INI exploration)
@@ -1611,6 +1620,10 @@ class Simulator:
         while t < max_time_steps:
             t += 1
             t_episode += 1
+
+            # Update target models if the update period has been reached
+            if t % learner.getTargetModelUpdatePeriod() == 0:
+                learner.updateTargetModels()
 
             state = self.env.getState()
 
@@ -4270,6 +4283,10 @@ class Simulator:
                 t += 1
                 t_episode += 1
 
+                # Update target models if the update period has been reached
+                if t % learner.getTargetModelUpdatePeriod() == 0:
+                    learner.updateTargetModels()
+
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()
                 action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
@@ -4851,6 +4868,10 @@ class Simulator:
             while not stop:
                 t += 1
                 t_episode += 1
+
+                # Update target models if the update period has been reached
+                if t % learner.getTargetModelUpdatePeriod() == 0:
+                    learner.updateTargetModels()
 
                 # Current state and action on that state leading to the next state
                 state = self.env.getState()

@@ -1046,9 +1046,11 @@ if __name__ == "__main__":
         env2d.plot()
 
         # Value function learner characteristics
+        plot = True
         use_neural_network = True
-        learner_type = "td" #"fv"
-        lr = 1E-3
+        use_separate_model_for_target_V = True
+        learner_type = "fv"
+        lr = 1E-2
         nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
         nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
         nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env2d.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
@@ -1087,16 +1089,17 @@ if __name__ == "__main__":
         learning_task = LearningTask.CONTINUING
         learning_criterion = LearningCriterion.AVERAGE
         gamma = 1.0
-        lmbda = 0.0
+        lmbda = 0.7
         # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
         # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
         # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
-        alpha_ini = 1.0 #1.0 if not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
-        print(f"Initial alpha = {alpha_ini}, but alpha >= {alpha_ini/10}")
+        alpha_ini = 1.0 #1.0 if learner_type == "td" or not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
+        print(f"Initial alpha = {alpha_ini} and then alpha(t) >= {alpha_ini/10}")
 
         # Learner (TD)
         learner_td = td.LeaTDLambda( env2d,
                                      dict_function_approximations=dict_function_approximations,
+                                     use_separate_model_for_target_V=use_separate_model_for_target_V,
                                      task=learning_task,
                                      criterion=learning_criterion,
                                      gamma=gamma,
@@ -1118,8 +1121,9 @@ if __name__ == "__main__":
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 dict_function_approximations=dict_function_approximations,
-                                criterion=learning_criterion,
+                                use_separate_model_for_target_V=use_separate_model_for_target_V,
                                 task=learning_task,
+                                criterion=learning_criterion,
                                 gamma=gamma,
                                 lmbda=lmbda,
                                 alpha=alpha_ini,
@@ -1141,13 +1145,17 @@ if __name__ == "__main__":
 
         # Simulation
         if learner_type == "fv":
-            sim_fv._run_fv(0, max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False, seed=seed, verbose=debug, verbose_period=T // 20, plot=True)
+            V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
+                sim_fv.run(max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,
+                                                use_average_reward_stored_in_learner=True, use_fixed_average_reward=False,
+                                                seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
             # Plot
             test_utils.plot_estimated_state_value_function(env2d, sim_fv.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_fv.getAgent().getLearner().getStateCounts(), alphas=sim_fv.getAgent().getLearner().getAlphasByState())
         else:
-            T = 500 #1000
+            T = 1500 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy
             #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
-            sim_td._run_single_continuing_task(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=False)
+            V, Q, A, state_counts, _, _, learning_info = \
+                sim_td.run(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
             # Plot
             test_utils.plot_estimated_state_value_function(env2d, sim_td.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_td.getAgent().getLearner().getStateCounts(), alphas=sim_td.getAgent().getLearner().getAlphasByState())
         plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T}")
