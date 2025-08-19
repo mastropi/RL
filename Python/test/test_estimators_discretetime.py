@@ -795,7 +795,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        0.309529,  0.319318,  0.335681,  0.361708, -0.599226]
         expected_state_counts = [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 130, 130, 130, 130, 130, 130, 130, 130, 130, 130]
         expected_time_steps = 2609
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
@@ -811,6 +816,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert learning_info['nsteps'] == expected_time_steps
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.122, atol=1E-3)
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTD0(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -857,7 +863,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        0.216678,  0.356023,  0.568982,  0.781315, -0.059804]
         expected_state_counts = [672, 593, 559, 568, 527, 480, 416, 361, 335, 299, 252, 208, 172, 146, 139, 121, 75, 41, 24, 13]
         expected_time_steps = 6000
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
@@ -873,6 +884,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert learning_info['nsteps'] == expected_time_steps
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.115, atol=1E-3)
 
     def test_EnvGridworld1DOneTerminal_PolOptimal_MetTDLambda(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -918,7 +930,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        0.410225,  0.460215,  0.510186,  0.560140, -0.389918]
         expected_state_counts = [131, 131, 131, 131, 131, 131, 131, 131, 131, 131, 130, 130, 130, 130, 130, 130, 130, 130, 130, 130]
         expected_time_steps = 2609
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
@@ -934,6 +951,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert learning_info['nsteps'] == expected_time_steps
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.0, atol=1E-3)
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambda(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -979,7 +997,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        0.460125,  0.515025,  0.623460,  0.750548, -0.118817]            
         expected_state_counts = [672, 593, 559, 568, 527, 480, 416, 361, 335, 299, 252, 208, 172, 146, 139, 121, 75, 41, 24, 13]
         expected_time_steps = 6000
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
@@ -995,6 +1018,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert learning_info['nsteps'] == expected_time_steps
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.040, atol=1E-3)
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetTDLambdaAdaptive(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -1040,7 +1064,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
                        0.446349,  0.523574,  0.667548,  0.808879, -0.060597]
         expected_state_counts = [672, 593, 559, 568, 527, 480, 416, 361, 335, 299, 252, 208, 172, 146, 139, 121, 75, 41, 24, 13]
         expected_time_steps = 6000
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of time steps in simulation: {learning_info['nsteps']}")
 
@@ -1056,6 +1085,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         assert learning_info['nsteps'] == expected_time_steps
         assert all(state_counts == expected_state_counts)
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.057, atol=1E-3)
 
     def test_EnvGridworld1DOneTerminal_PolOptimal_MetFV(self):
         print("\n*** Running test " + self.id() + " ***")
@@ -1124,7 +1154,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
         print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
@@ -1158,6 +1193,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
         assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.128, atol=1E-3)
         assert np.allclose(state_values, agent_fv_optimal.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFV(self):
@@ -1230,7 +1266,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
         print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
@@ -1264,6 +1305,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
         assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.077, atol=1E-3)
         assert np.allclose(state_values, agent_fv_random.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
 
     def test_EnvGridworld1DOneTerminal_PolOptimal_MetFVLambda(self):
@@ -1333,7 +1375,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
         print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
@@ -1367,6 +1414,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
         assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.012, atol=1E-3)
         assert np.allclose(state_values, agent_fv_optimal.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFVLambda(self):
@@ -1439,7 +1487,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
         print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
@@ -1473,6 +1526,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
         assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.034, atol=1E-3)
         assert np.allclose(state_values, agent_fv_random.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
 
     def test_EnvGridworld1DOneTerminal_PolRandomWalk_MetFVLambdaAdaptive(self):
@@ -1545,7 +1599,12 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
         # The following is NOT an expected value for the unit test, but just the expected reward under stationarity computed using its definition,
         # i.e. E(R) = sum{x} p(x)*r(x), where p(x) is the stationary probability
         expected_reward_under_stationarity = computing.compute_expected_reward(self.env1d, probas_stationary)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env1d.getV() - np.mean(self.env1d.getV()))
         print("\nObserved V(s): " + test_utils.array2str(state_values))
+        print("Expected V(s): " + test_utils.array2str(expected_V))
+        print("Mean-corrected Observed V(s): " + test_utils.array2str(state_values - np.mean(state_values)))
+        print("Mean-corrected True V(s): " + test_utils.array2str(self.env1d.getV() - np.mean(self.env1d.getV())))
+        print(f"RMSE: {RMSE:0.3f}")
         print("State count: " + test_utils.array2str(state_counts))
         print(f"Number of cycles observed in E(T) estimation: {n_cycles_absorption_used}")
         print(f"Estimated expected reabsorption time E(T): {average_absorption_time}")
@@ -1579,6 +1638,7 @@ class Test_EstDifferentialStateValueV_EnvGridworld1D(unittest.TestCase, test_uti
             assert np.isclose(probas_stationary[key], expected_probas_stationary[key])
         assert np.isclose(average_reward, expected_reward_under_stationarity), f"The estimated average reward must satisfy the expected reward formula under stationarity: average reward = {average_reward}, expected reward = {expected_reward_under_stationarity}"
         assert np.allclose(state_values, expected_V, atol=1E-6)
+        assert np.allclose(RMSE, 0.043, atol=1E-3)
         assert np.allclose(state_values, agent_fv_random.getLearner().getV().getValues(), atol=1E-6), "The observed V(s) must coincide with the V(s) stored in the learner"
 
 
@@ -1971,6 +2031,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         #                      [ 0.227911448,  0.0571451515, 0.356489193, 0.307192720 ],
         #                      [ 0.0,          0.203712757, -0.118279570, 0.274074074 ],
         #                      [ 0.192825112,  0.139437311,  0.0,         0.288914344 ]]
+        # RMSE(V)
+        cls.expected_mc_RMSE = 0.112
 
         # TD learner
         cls.expected_td_V = [  0.11512802,  0.26457653,  0.45853404, -0.07204246,
@@ -1988,6 +2050,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                                [-0.02092036,  0.1389521 , -0.02769491, -0.07170493],
                                [ 0.34357302,  0.26094573,  0.15072278, -0.02412405],
                                [ 0.51830314,  0.2576281 ,  0.24936403,  0.13991605]]
+        # RMSE(V)
+        cls.expected_td_RMSE = 0.067
 
         # DM-2023/09/20: The expected value function (expected_fv_V) is similar to the expected value function under TD
         # because the problem is small... However, in problems where FV really observes more often the rare states with
@@ -2025,6 +2089,8 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                                        [-0.06333507,  0.01069771, -0.06379519, -0.03582095],
                                        [ 0.26713995,  0.11440054,  0.03129102, -0.06331995],
                                        [ 0.43064039,  0.12029626,  0.12699954,  0.04465804]])
+        # RMSE(V)
+        cls.expected_fv_RMSE = 0.070
         cls.expected_fv_average_reward = 0.023652
         cls.expected_fv_cycle_time = 10.9121
         cls.expected_fv_n_cycles = 91
@@ -2075,6 +2141,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"State counts: " + test_utils.array2str(state_counts))
         print(f"Expected state counts: " + test_utils.array2str(self.expected_counts))
 
+        # RMSE(V)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env2d.getV() - np.mean(self.env2d.getV()))
+        print(f"RMSE(V): {RMSE:.3f}")
+
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
                self.nepisodes == 100 and \
@@ -2083,6 +2153,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.allclose(observed_V, self.expected_mc_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_mc_Q, atol=1E-6)
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
+        assert np.isclose(RMSE, self.expected_mc_RMSE, atol=1E-3)
 
         assert all(state_counts == self.expected_counts)
         assert sum(state_counts) == learning_info['nsteps'] + 1
@@ -2123,6 +2194,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print("Expected VALID state counts within cycles: " + test_utils.array2str(self.expected_state_counts_in_complete_cycles))
         print(f"Observed average cycle time on {learning_info['num_cycles']} cycles (expected={self.expected_n_cycles}): {learning_info['expected_cycle_time']} (expected={self.expected_cycle_time})")
 
+        # RMSE(V)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env2d.getV() - np.mean(self.env2d.getV()))
+        print(f"RMSE(V): {RMSE:.3f}")
+
         assert self.nS == 3*4 and \
                self.seed == 1717 and \
                self.nepisodes == 100 and \
@@ -2132,6 +2207,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.allclose(observed_V, self.expected_mc_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_mc_Q, atol=1E-6)
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
+        assert np.isclose(RMSE, self.expected_mc_RMSE, atol=1E-3)
 
         assert all(state_counts == self.expected_counts)
         assert sum(state_counts) == learning_info['nsteps'] + 1
@@ -2165,6 +2241,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
 
         print(f"learning steps: {learning_info['nsteps']}")
 
+        # RMSE(V)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env2d.getV() - np.mean(self.env2d.getV()))
+        print(f"RMSE(V): {RMSE:.3f}")
+
         test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_td.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
@@ -2175,6 +2255,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.allclose(observed_V, self.expected_td_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_td_Q, atol=1E-6)
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
+        assert np.isclose(RMSE, self.expected_td_RMSE, atol=1E-3)
 
         assert all(state_counts == self.expected_counts)
         assert sum(state_counts) == learning_info['nsteps'] + 1
@@ -2219,6 +2300,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"Average reward (using renewal theory): {observed_average_reward_from_cycles}")
         print(f"Expected average reward: {self.expected_average_reward_from_cycles}")
 
+        # RMSE(V)
+        RMSE = computing.rmse(state_values - np.mean(state_values), self.env2d.getV() - np.mean(self.env2d.getV()))
+        print(f"RMSE(V): {RMSE:.3f}")
+
         test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_td.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
@@ -2230,6 +2315,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         assert np.allclose(observed_V, self.expected_td_V, atol=1E-6)
         assert np.allclose(observed_Q, self.expected_td_Q, atol=1E-6)
         assert np.isclose(observed_average_reward, self.expected_average_reward, atol=1E-6)
+        assert np.isclose(RMSE, self.expected_td_RMSE, atol=1E-3)
 
         assert all(state_counts == self.expected_counts)
         assert sum(state_counts) == learning_info['nsteps'] + 1
@@ -2281,6 +2367,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print(f"Expected estimated average reward (using FV estimator): {self.expected_fv_average_reward}")
         print(f"Expected estimated average reward (using TD estimator): {self.expected_average_reward}")
 
+        # RMSE(V)
+        RMSE = computing.rmse(observed_values_V - np.mean(observed_values_V), self.env2d.getV() - np.mean(self.env2d.getV()))
+        print(f"RMSE(V): {RMSE:.3f}")
+
         test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_fv.getAgent().getLearner().getAlphasByState())
 
         assert self.nS == 3*4 and \
@@ -2312,6 +2402,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         # Assertions about the value functions
         assert np.allclose(observed_values_V, self.expected_fv_V, atol=1E-6)
         assert np.allclose(observed_values_Q, self.expected_fv_Q, atol=1E-6)
+        assert np.isclose(RMSE, self.expected_fv_RMSE, atol=1E-3)
 
     def test_Env_PolRandomWalk_MetFV_SoftKilling(self):
         "Tests the differential value functions estimation using Fleming-Viot with soft killing"
@@ -2340,6 +2431,10 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
         print("\nState probability distribution using the ET+FV estimator: " + test_utils.array2str(observed_p_fv))
         print(f"(observed average cycle time on {n_cycles} cycles: {average_cycle_time}")
         print(f"\nEstimated average reward (using FV estimator): {observed_average_reward}")
+
+        # RMSE(V)
+        RMSE = computing.rmse(observed_values_V - np.mean(observed_values_V), self.env2d.getV() - np.mean(self.env2d.getV()))
+        print(f"RMSE(V): {RMSE:.3f}")
 
         test_utils.plot_estimated_state_value_function(self.env2d, state_values, LearningCriterion.AVERAGE, state_counts=state_counts, alphas=self.sim_fv.getAgent().getLearner().getAlphasByState())
 
@@ -2388,6 +2483,7 @@ class Test_EstDifferentialValueFunctions_EnvGridworld2DWithObstacles(unittest.Te
                                                [-0.05193447,  0.11156354, -0.05182949, -0.10353123],
                                                [ 0.26850003,  0.29431717,  0.1271709 , -0.0500451 ],
                                                [ 0.55739791,  0.3035721 ,  0.31107617,  0.12689527]], atol=1E-6)
+        assert np.isclose(RMSE, 0.059, atol=1E-3)
 
 
 class Test_EstValueFunctionV_MetMCLambda_EnvMountainCar(unittest.TestCase, test_utils.EpisodeSimulation):
