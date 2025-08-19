@@ -264,6 +264,7 @@ class Simulator:
             This used for informational purposes, and to decide whether some learner resetting should be done, namely when t_learn <= 0,
             which indicates that a whole new simulation process (e.g. a new replication) is run,
             possibly using the same learner stored in the simulator object used for running the simulations.
+            default: -1
 
         max_time_steps: (opt) int
             Maximum number of steps to run the simulation for, computed as the comprehensive number of transitions observed over ALL particles.
@@ -700,8 +701,8 @@ class Simulator:
                 print(f"Distribution of state frequency on n={_learner.getNumSteps()} steps\n(WARNING: relative frequencies 'f' may NOT be those used to select the states in A because they may include states with NON-ZERO reward):"
                       f"\n{pd.concat([pd.Series(dist_state_counts, name='f'), pd.Series(np.cumsum(dist_state_counts), name='F')], axis=1)}")
 
-                if dict_params_info['t_learn'] == 0:
-                    # Store the absorption set in the learner as this is the first learning step
+                if dict_params_info['t_learn'] <= 0:
+                    # Store the absorption set in the learner as this is the first learning step (t_learn = 0) or a process that is run out of a policy learning step context (t_learn < 0)
                     # NOTE: Even if there is already an absorption set stored in the learner we should NOT consider it as a reference absorption set
                     # because the current execution of the process could correspond to a new replication run (on a different seed from the one used to store that absorption set).
                     # In fact, most likely an absorption set was created and stored in the FV learner during construction of the test class used to run this learning process,
@@ -984,7 +985,14 @@ class Simulator:
                                 #   (this was observed already in a 6x8 random labyrinth (seed=4217) with WIND=0.6 , that's why I am writing this!)
                                 #   In any case, I don't think this small bias would have a large impact in a bad learning of the value functions...but haven't really checked that.
                                 estimated_average_reward=estimated_average_reward_before_initial_exploration,
-                                use_fixed_average_reward=use_fixed_average_reward,
+                                # DM-2025/08/16: We use the average reward estimated by the A-estimation exploration because it is more reliable than
+                                # starting estimating the average reward iteratively from scratch, especially because the average reward in _run_single_continuing_task()
+                                # is updated by EPISODE!! (as opposed to at every simulation step!)
+                                # Furthermore, since this MC step of the FV process starts at the boundary of A, for small environments with non-rare rewards,
+                                # the signal is likely to be observed early on in the simulation (because the boundary of A is close to the reward in that case
+                                # --as A contains states with zero reward) and that early signal generates instabilities in V(s) learning at the onset,
+                                # which may cause divergence (this was observed during a debugging analysis of the process by setting `debug=True` in the learner constructor).
+                                use_fixed_average_reward=True, #use_fixed_average_reward,
                                 reset_value_functions=reset_value_functions,
                                 epsilon_random_action=dict_params_simul['epsilon_random_action'],
                                 reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
@@ -4846,6 +4854,8 @@ class Simulator:
         episode = -1
         done = False
         while not done:
+            # TODO: (2025/08/18) Implement the update of the average reward by simulation step, NOT by EPISODE (this is easily done... just take the implementation done in run_exploration_and_learn_value_functions()
+            # Goal: Avoid the instability that may occur in the episodic ITERATIVE update of the average reward at the beginning of the simulation process when a reward signal is observed early on and then no more rewards are observed.
             episode += 1
 
             # Reset the environment (ONLY if it is not the very first step, because in that case, the reset has been already carried out above, before resetting the learner

@@ -1155,7 +1155,9 @@ if __name__ == "__main__":
             T = 1500 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy
             #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
             V, Q, A, state_counts, _, _, learning_info = \
-                sim_td.run(max_time_steps=T, seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
+                sim_td.run(max_time_steps=T,
+                           use_fixed_average_reward=False, estimated_average_reward=0.0,
+                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
             # Plot
             test_utils.plot_estimated_state_value_function(env2d, sim_td.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_td.getAgent().getLearner().getStateCounts(), alphas=sim_td.getAgent().getLearner().getAlphasByState())
         plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T}")

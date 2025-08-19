@@ -988,7 +988,7 @@ keep_fv_estimation_of_average_reward_and_stationary_probability_consistent = Fal
 learning_steps_observe = [7, 8, 23, 24] #[1, 2, 7, 8, 22, 23, 24] #[50, 90] #[2, 30, 48] #[2, 10, 11, 30, 31, 49, 50] #[7, 20, 30, 40]  # base at 1, regardless of the base value used for t_learn
 verbose_period = max_time_steps_fv_for_all_particles // 10
 plot = False         # Whether to plot the evolution of the state value function and average reward estimation
-plot_policy_update = True  # Whether to plot the policy after each policy learning step update
+plot_policy_update = False  # Whether to plot the policy after each policy learning step update
 colormap = "seismic"  # "Reds"  # Colormap to use in the plot of the estimated state value function V(s)
 
 # A few further parameters for the policy learning process
@@ -1272,6 +1272,7 @@ for learning_method in learning_methods:
                 reset_value_functions_at_this_step = reset_value_functions_at_every_learning_step if t_learn > 0 else True
                 # Update the initial learning rate for the value functions at each learning step to a smaller value than the previous learning step
                 # SHOULD WE SET IT TO THE AVERAGE LEARNING RATE FROM THE PREVIOUS LEARNING STEP?? (so that we start off where we left at the last learning moment)
+                # (2025/08/19) This is CURRENTLY NOT USED!
                 alpha_initial_at_current_learning_step = alpha_initial / (t_learn + 1)
 
                 #-- Optionally adjust the initial learning rate alpha
