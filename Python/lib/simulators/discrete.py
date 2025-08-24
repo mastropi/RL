@@ -35,9 +35,10 @@ from matplotlib import pyplot as plt, cm
 from matplotlib.ticker import MaxNLocator
 import gym
 
-from Python.lib.agents.learners import LearningCriterion, LearningTask
+from Python.lib.agents.learners import LearningCriterion, LearningTask, LearningMode
 from Python.lib.agents.learners.episodic.discrete.fv import LeaFV
 from Python.lib.agents.learners.episodic.discrete.td import LeaTDLambdaAdaptive
+from Python.lib.agents.learners.value_functions import nn_train
 from Python.lib.estimators import DEBUG_ESTIMATORS
 from Python.lib.estimators.fv import initialize_phi, estimate_stationary_probabilities, update_phi, update_phi_on_all_states
 from Python.lib.agents.policies.parameterized import PolNN
@@ -212,13 +213,20 @@ class Simulator:
         if not self.agent.getLearner().getA().isTabular():
             self.agent.getLearner().getA().getModel().train()
 
+        # TODO: (2025/08/20) Make this reset of transitions part of the learner reset. However, this is not so easy now because we do NOT want to reset the transitions before starting the FV simulation as we need the transitions observed during the MC step for the BATCH learning, and this is currently not honoured by the Learner.reset(), which only resets the transitions when reset_value_functions=True, and this parameter is usually set to False in policy learning because we start with the value functions learned at the previous policy learning step.
+        # Reset the transitions stored in the learner, which are used for BATCH learning of value functions
+        self.agent.getLearner().reset_transitions()
+
         # Set the POLICY in evaluation mode (e.g. this is the time to compute the Critic of a policy, where the policy is evaluated, NOT trained)
         if isinstance(self.agent.getPolicy(), PolNN):
             self.agent.getPolicy().nn_model.eval()
 
         # Run the simulation and learning process
         if isinstance(self.agent.getLearner(), LeaFV):
-            output = self._run_fv(**kwargs)
+            state_values, action_values, advantage_values, \
+                state_counts, state_counts_et, \
+                    probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
+                        self._run_fv(**kwargs)
         else:
             if self.agent.getLearner().getLearningTask() == LearningTask.CONTINUING:
                 kwargs['nepisodes'] = 1
@@ -226,12 +234,43 @@ class Simulator:
             else:
                 kwargs = keep_dict_params_defined_in_function(kwargs, self._run_single)
                 output = self._run_single(**kwargs)
+            state_values, action_values, advantage_values, state_counts, RMSE, MAPE, learning_info = output
+
+        # BATCH learning (if required)
+        if kwargs.get('learning_mode', LearningMode.ONLINE) == LearningMode.BATCH and not self.agent.getLearner().getV().isTabular():
+            # Learn V(s) and A(s,a) NOW!
+            epochs = 50 #150
+            batch_size = 50
+            sampling_rate = 0.5 #1.0 #0.5
+            if len(self.agent.getLearner().getTransitionNonZeroRewards()) == 0:
+                print(f"\nINFO: Training of the NN model for V(s) and learning of the advantage function A(s,a) is NOT run because NO informative rewards have been observed!")
+            else:
+                print(f"\nTraining the NN model for V(s) and learning the advantage function A(s,a) on {epochs} epochs with batches of size {batch_size}...")
+                loss_values_train = nn_train(self.agent.getLearner(), batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=True,
+                                             alpha_ini=self.agent.getLearner().getInitialLearningRate(), alpha_min=0.0, #self.agent.getLearner().getMinimumLearningRate(),
+                                             seed=kwargs.get('seed'), verbose=True, verbose_period=epochs // 10)
+                print(f"The training loss went from {loss_values_train[0]:.4f} at epoch 1 to {loss_values_train[-1]:.4f} ({(loss_values_train[-1] / loss_values_train[0] - 1)*100:.1f}% change) "
+                      f"at epoch {epochs} on batches of size {batch_size}.")
+
+                # Update the value functions after they were just learned
+                state_values = self.agent.getLearner().getV().getValues()
+                if self.agent.getLearner().getQ() is not None:
+                    action_values = self.agent.getLearner().getQ().getValues()
+                advantage_values = self.agent.getLearner().getA().getValues()
 
         self.agent.getLearner().updateTargetModels()
 
+        # Prepare the output to return
+        if isinstance(self.agent.getLearner(), LeaFV):
+            output = state_values, action_values, advantage_values, \
+                        state_counts, state_counts_et, \
+                            probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv
+        else:
+            output = state_values, action_values, advantage_values, state_counts, RMSE, MAPE, learning_info
+
         return output
 
-    def _run_fv(self, t_learn=-1, max_time_steps=None,
+    def _run_fv(self, t_learn=-1, learning_mode=LearningMode.ONLINE, max_time_steps=None,
                 max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=1.0, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
                 min_num_cycles_for_expectations=None,
                 soft_killing=False,
@@ -475,6 +514,7 @@ class Simulator:
                 self._estimate_value_functions_and_expected_reward_fv(  envs, dict_params_simul, dict_params_info,
                                                                         probas_stationary_start_state_et=self.agent.getLearner().getProbasStationaryStartStateET(),
                                                                         probas_stationary_start_state_fv=self.agent.getLearner().getProbasStationaryStartStateFV(),
+                                                                        learning_mode=learning_mode,
                                                                         use_average_reward_stored_in_learner=use_average_reward_stored_in_learner,
                                                                         use_fixed_average_reward=use_fixed_average_reward,
                                                                         keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=keep_fv_estimation_of_average_reward_and_stationary_probability_consistent,
@@ -485,6 +525,7 @@ class Simulator:
     def _estimate_value_functions_and_expected_reward_fv( self, envs, dict_params_simul, dict_params_info,
                                                           probas_stationary_start_state_et: dict=None,
                                                           probas_stationary_start_state_fv: dict=None,
+                                                          learning_mode=LearningMode.ONLINE,
                                                           use_average_reward_stored_in_learner=False,
                                                           use_fixed_average_reward=False,
                                                           keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=True,
@@ -961,9 +1002,13 @@ class Simulator:
                 warnings.warn(warning_msg)
             time.sleep(0.5)
 
+            # Reset the transitions, just in case this is not the first time this initial exploration is run
+            # Goal: Avoid an oversampling of transitions in the non-informative set of states A during BATCH learning of V(s) model parameters
+            #self.agent.getLearner().reset_transitions()
             state_values, action_values, advantage_values, state_counts_et, _, _, learning_info = \
                 self._run_single_continuing_task(
                                 t_learn=dict_params_info['t_learn'],
+                                learning_mode=learning_mode,
                                 max_time_steps=dict_params_simul['T'],      # Max simulation time over ALL episodes
                                 start_state_first_episode=start_state,
                                 #estimated_average_reward=0.0,  # (2025/05/18) Use this (TOGETHER WITH use_fixed_average_reward=True) for the ABLATION study of estimating the average reward at a wrong value (e.g. always 0)
@@ -1023,6 +1068,11 @@ class Simulator:
                 self.agent.getLearner().setSampleSizeForAverageReward( n_events_a + learning_info['nsteps'] )
             else:
                 self.agent.getLearner().setSampleSizeForAverageReward( self.agent.getLearner().getSampleSizeForAverageReward() + learning_info['nsteps'] )
+                # Keep just the transitions for the very first exploration
+                # Goal: Avoid an oversampling of transitions in the non-informative set of states A during BATCH learning of V(s) model parameters
+                self.agent.getLearner().setTransitions(
+                    deque([trans for i, trans in enumerate(self.agent.getLearner().getTransitions()) if i < self.agent.getLearner().getOriginalNumTimeStepsForExpectation()])
+                )
 
             # Check if EXIT states from A have been observed
             if len(learning_info['probas_stationary_exit_cycle_set']) == 0 and dict_params_simul['T'] < MAX_NUMBER_OF_STEPS_FOR_EXPECTATION:
@@ -1260,6 +1310,7 @@ class Simulator:
             n_events_fv, state_values, action_values, advantage_values, state_counts_fv, phi, df_proba_surv, expected_absorption_time, max_survival_time, absorption_set, less_frequently_visited_set = \
                 method_fv(  dict_params_info['t_learn'], envs,
                             dict_params_simul['absorption_set'],
+                            learning_mode=learning_mode,
                             start_set=start_set if not dict_params_simul['soft_killing'] else None,
                             max_time_steps=dict_params_simul['max_time_steps'],
                             max_time_steps_for_absorbed_particles_check=dict_params_simul['max_time_steps_for_absorbed_particles_check'],
@@ -1562,7 +1613,7 @@ class Simulator:
 
         return learner, t, average_reward
 
-    def run_exploration_and_learn_value_functions(self, t_learn=-1, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
+    def run_exploration_and_learn_value_functions(self, t_learn=-1, learning_mode=LearningMode.ONLINE, max_time_steps=1000, epsilon_random_action=0.0, seed=None, verbose=False, verbose_period=1):
         """
         Performs an exploration of the environment under a CONTINUING learning task, with the main objective of collecting state visit frequencies.
         However, the exploration is also used to learn the differential value functions.
@@ -1667,6 +1718,7 @@ class Simulator:
             # TEMPORARY (2024/05/14): Needed only because of the EPISODIC view of the average reward to compute the CONTINUING average reward
 
             # Learn (and update the trajectory stored in the learner)
+            info['learning_mode'] = learning_mode
             learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
             if False:
                 # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions
@@ -1686,6 +1738,7 @@ class Simulator:
 
     @measure_exec_time
     def _run_simulation_fv(self, t_learn, envs, absorption_set,
+                           learning_mode=LearningMode.ONLINE,
                            start_set: set=None,
                            max_time_steps=None,
                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=1.0, stopping_criterion_fv=StoppingCriterion.MAX_TIME_STEPS_OR_MIN_PROP_ABSORBED_PARTICLES,
@@ -2336,6 +2389,7 @@ class Simulator:
                 # Learn the value functions for the terminal state for the continuing learning task case,
                 # because in that case the value of terminal states is NOT defined as 0.
                 if learner.getLearningTask() == LearningTask.CONTINUING:
+                    info['learning_mode'] = learning_mode
                     if is_learner_td_lambda:
                         # Use TD(lambda) on each particle separately, BUT using the COMMONLY estimated average reward (since we need all particles to do so)
                         info['average_reward'] = estimated_average_reward if use_fixed_average_reward else learner.getAverageReward()
@@ -2364,6 +2418,7 @@ class Simulator:
                 # reward will fluctuate a lot (i.e. as the average reward observed by episode fluctuates) and this is NOT what we want,
                 # we want a stable estimate of the average reward over all episodes.
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
+                info['learning_mode'] = learning_mode
                 if use_fixed_average_reward:
                     # NOTE: Setting this parameter to True ONLY has an effect when the stopping criterion is NOT any of the ones that include the MAX_TIME_STEPS condition
                     # (i.e. the stopping criterion is different from MAX_TIME_STEPS and MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES)
@@ -2707,14 +2762,15 @@ class Simulator:
     @measure_exec_time
     # DM-2025/02/03: Deprecated method because the signature of the MOTHER method _run_simulation_fv() changed from `stop_if_prop_absorbed_particles_reached_regardless_of_time_steps` to `stopping_criterion_fv`.
     def _deprecated_run_simulation_fv_fraiman( self, t_learn, envs, absorption_set: set, start_set: set,
-                                    max_time_steps=None,
-                                    max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
-                                    dist_proba_for_start_state: dict=None,
-                                    expected_absorption_time=None, expected_exit_time=None,
-                                    estimated_average_reward=None,
-                                    epsilon_random_action=0.0,
-                                    seed=None, verbose=False, verbose_period=1,
-                                    plot=False, colormap="seismic", pause=0.1):
+                                               learning_mode=LearningMode.ONLINE,
+                                               max_time_steps=None,
+                                               max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
+                                               dist_proba_for_start_state: dict=None,
+                                               expected_absorption_time=None, expected_exit_time=None,
+                                               estimated_average_reward=None,
+                                               epsilon_random_action=0.0,
+                                               seed=None, verbose=False, verbose_period=1,
+                                               plot=False, colormap="seismic", pause=0.1):
         """
         Runs the Synchronous Fleming-Viot simulation of the particle system proposed by Fraiman et al. in their Oct-2020 paper
         (https://arxiv.org/abs/2010.09942, "Approximation quasi-stationary distributions with interactive reinforced random walks")
@@ -2860,6 +2916,7 @@ class Simulator:
                     # Learn the value functions for the terminal state for the continuing learning task case,
                     # because in that case the value of terminal states is NOT defined as 0.
                     if learner.getLearningTask() == LearningTask.CONTINUING:
+                        info['learning_mode'] = learning_mode
                         self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info)
                             ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
                             ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
@@ -2870,6 +2927,7 @@ class Simulator:
                     # Step on the selected particle
                     action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = envs[idx_particle].step(action)
+                    info['learning_mode'] = learning_mode
                     if estimated_average_reward is not None:
                         # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
                         # by the call to the learn() method below as correction value when learning the value functions under the average reward criterion
@@ -3041,14 +3099,15 @@ class Simulator:
     @measure_exec_time
     # DM-2025/02/03: Deprecated method because the signature of the MOTHER method _run_simulation_fv() changed from `stop_if_prop_absorbed_particles_reached_regardless_of_time_steps` to `stopping_criterion_fv`.
     def _deprecated_run_simulation_fv_fraiman_modified(self, t_learn, envs, absorption_set: set, start_set: set,
-                                            max_time_steps=None,
-                                            max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
-                                            dist_proba_for_start_state: dict=None,
-                                            expected_absorption_time=None, expected_exit_time=None,
-                                            estimated_average_reward=None,
-                                            epsilon_random_action=0.0,
-                                            seed=None, verbose=False, verbose_period=1,
-                                            plot=False, colormap="seismic", pause=0.1):
+                                                       learning_mode=LearningMode.ONLINE,
+                                                       max_time_steps=None,
+                                                       max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90, stop_if_prop_absorbed_particles_reached_regardless_of_time_steps=False,
+                                                       dist_proba_for_start_state: dict=None,
+                                                       expected_absorption_time=None, expected_exit_time=None,
+                                                       estimated_average_reward=None,
+                                                       epsilon_random_action=0.0,
+                                                       seed=None, verbose=False, verbose_period=1,
+                                                       plot=False, colormap="seismic", pause=0.1):
         """
         Runs the MODIFIED Synchronous Fleming-Viot simulation of the particle system proposed by Fraiman et al. in their Oct-2020 paper
         (https://arxiv.org/abs/2010.09942, "Approximation quasi-stationary distributions with interactive reinforced random walks")
@@ -3193,6 +3252,7 @@ class Simulator:
                     # Learn the value functions for the terminal state for the continuing learning task case,
                     # because in that case the value of terminal states is NOT defined as 0.
                     if learner.getLearningTask() == LearningTask.CONTINUING:
+                        info['learning_mode'] = learning_mode
                         self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info)
                             ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
                             ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
@@ -3203,6 +3263,7 @@ class Simulator:
                     # Step on the selected particle
                     action = self._choose_action(policy, state, epsilon_random_action=epsilon_random_action)
                     next_state, reward, done_episode, info = envs[idx_particle].step(action)
+                    info['learning_mode'] = learning_mode
                     if estimated_average_reward is not None:
                         # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
                         # by the call to the learn() method below as correction value when learning the value functions under the average reward criterion
@@ -3351,15 +3412,16 @@ class Simulator:
     # Another reason for deprecation is that doing FV in the discounted context as implemented here is highly computationally intensive
     # and it therefore doesn't make sense to be used.
     def _deprecated_run_simulation_fv_discounted(  self, t_learn, envs, absorption_set: set, start_set: set,
-                                        max_time_steps=None,
-                                        max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,
-                                        number_free_particles=1,
-                                        dist_proba_for_start_state: dict=None,
-                                        expected_absorption_time=None, expected_exit_time=None,
-                                        estimated_average_reward=None,
-                                        epsilon_random_action=0.0,
-                                        seed=None, verbose=False, verbose_period=1,
-                                        plot=False, colormap="seismic", pause=0.1):
+                                                   learning_mode=LearningMode.ONLINE,
+                                                   max_time_steps=None,
+                                                   max_time_steps_for_absorbed_particles_check=+np.Inf, min_prop_absorbed_particles=0.90,
+                                                   number_free_particles=1,
+                                                   dist_proba_for_start_state: dict=None,
+                                                   expected_absorption_time=None, expected_exit_time=None,
+                                                   estimated_average_reward=None,
+                                                   epsilon_random_action=0.0,
+                                                   seed=None, verbose=False, verbose_period=1,
+                                                   plot=False, colormap="seismic", pause=0.1):
         """
         Arguments:
         number_free_particles: (opt) int
@@ -3693,6 +3755,7 @@ class Simulator:
                 # Note that the transition from the terminal state to the start state is stored as part of the particle's trajectory
                 # (because we are passing env=envs[idx_particle] as parameter to learn_terminal_state_values()).
                 if learner.getLearningTask() == LearningTask.CONTINUING:
+                    info['learning_mode'] = learning_mode
                     self.learn_terminal_state_values(learner, t_clock, state, action, next_state, reward, info, envs=envs, idx_particle=idx_particle, update_phi=True)
             else:
                 # Step on the selected particle
@@ -3708,6 +3771,7 @@ class Simulator:
                     has_particle_been_selected_once[idx_particle] = True
                 next_state, reward, done_episode, info = envs[idx_particle].step(action)
                 n_steps_on_all_environments += 1
+                info['learning_mode'] = learning_mode
                 if estimated_average_reward is not None:
                     # Store the estimated average reward passed by the user in the `info` dictionary so that it can be used
                     # by the call to the learn() method below as correction value when learning the value functions under the average reward criterion
@@ -3748,6 +3812,7 @@ class Simulator:
                 # (see the learn_at_absorption() method), and we want to learn the value of the states outside A using the FV estimator,
                 # not from the exploration of the underlying Markov process carried out here by these "normal" particles.
                 # It is worth noting that state counts are stored in the learner NOT in the environment associated to the particle being updated here)
+                info_normal['learning_mode'] = learning_mode
                 learner.learn(t, state_normal, action_normal, next_state_normal, reward_normal, done_normal, info_normal, envs=envs_normal, idx_particle=idx_env, update_phi=False)
                 if done_normal and learner.getLearningTask() == LearningTask.CONTINUING:
                     # Go to an environment's start state and learn the value of the terminal state
@@ -3961,7 +4026,9 @@ class Simulator:
 
         return n_steps_on_all_environments, learner.getV().getValues(), learner.getQ().getValues(), learner.getA().getValues(), learner.getStateCounts(), learner.dict_phi, df_proba_surv, expected_absorption_time, max_survival_time
 
-    def _run_single(self, nepisodes, t_learn=-1, max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
+    def _run_single(self, nepisodes, t_learn=-1,
+                    learning_mode=LearningMode.ONLINE,
+                    max_time_steps=+np.Inf, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None, reset_value_functions=True,
                     seed=None, compute_rmse=False, weights_rmse=None,
                     state_observe=None,
                     epsilon_random_action=0.0,
@@ -4265,6 +4332,7 @@ class Simulator:
                     # We choose a RANDOM action to transition to the start state as no particular action is associated to a terminal state, by definition of terminal state.
                     action = np_random.choice(np.arange(self.env.getNumActions()))
                     reward = self.env.getReward(self.env.getState())
+                    info['learning_mode'] = learning_mode
                     self.learn_terminal_state_values(learner, t_episode, terminal_state_previous_episode, action, self.env.getState(), reward, info, done_episode=done_episode)
                         ## Notes:
                         ## - it's important that t_episode = -1 here (as is the case because of the reset of t_episode to -1 above) so that there is NO update of the average reward
@@ -4506,7 +4574,9 @@ class Simulator:
                     'V_state_observe': V_state_observe,
                 }
 
-    def _run_single_continuing_task(self, t_learn=-1, nepisodes=1, max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None,
+    def _run_single_continuing_task(self, t_learn=-1, nepisodes=1,
+                                    learning_mode=LearningMode.ONLINE,
+                                    max_time_steps=1000, max_time_steps_per_episode=+np.Inf, start_state_first_episode=None,
                                     estimated_average_reward=None, use_fixed_average_reward=False, reset_value_functions=True,
                                     seed=None, compute_rmse=False, weights_rmse=None,
                                     state_observe=None, set_cycle=None, dict_proba_cycle=None,
@@ -5031,6 +5101,7 @@ class Simulator:
                     # Note that the check of whether estimated_average_reward is missing has been done at the beginning when parsing input parameters,
                     # in which case parameter use_fixed_average_reward is set to False.
                     info['average_reward'] = estimated_average_reward
+                info['learning_mode'] = learning_mode
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
                 if False:
                     # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions

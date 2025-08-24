@@ -25,13 +25,15 @@ from typing import Union
 from enum import Enum, unique
 
 import numpy as np
-
+import pandas as pd
 import torch
+from tqdm import tqdm
 
 from Python.lib.agents.learners import ResetMethod
 
 from Python.lib.estimators.nn_models import InputLayer, NNBackprop
 from Python.lib.simulators.fv import StoppingCriterion
+from Python.lib.simulators import show_messages
 
 from Python.lib.utils.basic import is_scalar
 from Python.lib.utils import computing
@@ -983,6 +985,168 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
             return gradient
 
 
+def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=False, alpha_ini=1.0, alpha_min=0.0, seed=None, verbose=False, verbose_period=1):
+    """
+    Trains a neural network used for state value function approximation V(s) from pre-recorded transitions stored in the given learner
+
+    If the learner requires the use of a TARGET V(s) model, the target V(s) model is updated at the end of every epoch.
+
+    oversample: bool
+        Whether to oversample the states according to their possible actions (based on the observed next states being different from the original state)
+        default: False
+
+    alpha_ini: positive float
+        Initial learning rate for the advantage learning.
+        default: 1.0
+    """
+    np.random.seed(seed)
+
+    # (2025/08/19) The following fails when this function is called from e.g. discrete.Simulator.run()
+    # because the type of learner.getV() is `__main__.StateValueFunctionApproxNN` as opposed to `StateValueFunctionApproxNN`... GRRRR*!*#&@$*@&#*$@#(*$*(@!!!!
+    # Currently don't know how to solve it.
+    #if learner.getV() is None or not isinstance(learner.getV(), StateValueFunctionApproxNN):
+    #    raise ValueError(f"The state value function approximation to train is either None or not a neural network model: {learner.getV()}")
+
+    nn_model = learner.getV().getModel()
+
+    # Set the NN in training mode
+    nn_model.train()
+
+    # Compute the number of batches to consider for each parameter update based on the transitions size and the batch size
+    transitions = learner.getTransitions()
+    num_transitions = len(transitions)
+
+    # Define the selection probability of each state, based on their number of possible actions (i.e. the number of actions that made the agent change state)
+    if oversample:
+        # Oversample the states with less number of allowed actions
+        # Goal: Try to oversample corner states which are more difficult to learn
+        df_transitions = learner.getTransitionsAsDataFrame()
+        df_transitions['sdiff'] = np.abs(df_transitions['ns'] - df_transitions['s'])
+
+        # Just in case it is useful
+        # pd.crosstab(df_transitions['s'], df_transitions['ns']).reindex(columns=[0, 1, 2, 3, 4, 5], fill_value=0)
+
+        # df_transitions_by_state_action = df_transitions.groupby(['s', 'a', 'sdiff']).agg(['count']).reset_index().groupby(['s', 'a'])['sdiff'].agg(['max']).reset_index(drop=False)
+        df_transitions_by_state_action = df_transitions.groupby(['s', 'a', 'sdiff']).agg(['count']).reset_index().groupby(['s', 'a'])['sdiff'].value_counts().unstack(fill_value=0)
+        # Flag the combination (s,a) for which the sum of possible transition state differences (sdiff) coincides with the number of transitions with NO change of state
+        # This means that taken action `a` on state `s` ALWAYS led to the same state `s` (because sdiff = 0 for all (s,a) cases observed in transitions)
+        df_num_impossible_action_by_state = pd.DataFrame(
+            (df_transitions_by_state_action.sum(axis=1) == df_transitions_by_state_action[0]).unstack(
+                fill_value=False).reindex(columns=np.arange(learner.env.getNumActions()), fill_value=False).sum(axis=1),
+            columns=['num_impossible_actions']
+        )
+
+        # Add this piece of information to the transitions data frame
+        # WARNING: pd.merge() sorts the data frame rows by the order dictated by the index of df_num_impossible_action_by_state (since right_index=True).
+        # However, the original order of the rows is preserved in the `index` attribute of the merged data frame, and this order is re-established with `sort_index()`
+        # This is done so that we can simply pass `num_transitions` as first argument of the np.random.choice() call below,
+        # as opposed to the whole `index` attribute of the transitions data frame.
+        df_transitions = pd.merge(df_transitions, df_num_impossible_action_by_state, left_on='s', right_index=True).sort_index()
+        # Increase the selection weight from the defalt of 1 (which corresponds to the uniform distribution) to 1 + "number of impossible actions of the state'
+        df_transitions['w_selection'] = 1 + df_transitions['num_impossible_actions']
+        # Compute the selection probability (by normalizing by the sum of weights over ALL observed transitions)
+        p_selection = df_transitions['w_selection'] / np.sum(df_transitions['w_selection'])
+    else:
+        p_selection = None
+    replace = True  # Taking samples with replacement is usually better than without replacement
+
+    # Keep track of the loss values recorded at the end of each epoch
+    loss_values_train = np.nan * np.ones(epochs)
+    #loss_values_eval = np.nan * np.ones(epochs)
+
+    # Visit counts for the learning rate adjustment for the advantage function learning
+    visit_counts = np.zeros((learner.env.getNumStates(), learner.env.getNumActions()), dtype=int)
+    for epoch in range(epochs): #tqdm(range(epochs)):
+        # Each epoch is defined by going over a given number of transitions stored in the learner, specified by the sampling_rate
+        # The transitions are grouped in batches and after each batch an update of the model parameters is done based on the collected loss
+
+        # Choose the indices to include in the batches run in the current learning epoch
+        if sampling_rate is not None:
+            sample_size = int(sampling_rate * num_transitions)
+            sample_indices = np.random.choice(num_transitions, size=sample_size, p=p_selection, replace=replace)
+        else:
+            sample_size = num_transitions
+            # Indices that shuffle the transitions data so that each batch has nearly independent samples
+            sample_indices = np.random.permutation(num_transitions)
+
+        # Batch size
+        num_batches = max(1, sample_size / batch_size)
+        # Consider the last incomplete batch also in the execution
+        if num_batches - int(num_batches) > 0:
+            num_batches += 1
+        num_batches = int(num_batches)
+
+        if show_messages(verbose, verbose_period, epoch):
+            print(f"===== Running epoch {epoch+1} of {epochs} ({num_batches} batches of size {batch_size} on {sampling_rate*100:.1f}% sample (oversample={oversample}) of full data (N={num_transitions}) ======")
+
+        for b in range(num_batches): #tqdm(range(num_batches)):
+            if False and verbose:
+                print(f"Epoch {epoch+1} of {epochs}, batch {b+1} of {num_batches}...")
+
+            # Reset loss function for the current batch
+            # NOTE the use of the trick to call next() on the policy parameters, so that the gradient can be computed via a call to loss.backward()
+            # even if the loss is NOT updated during the loop, because e.g. no entry to the line `loss += -advantage * logprob` that updates the loss occurs
+            # This is NOT documented at all and I arrived to the solution using ChatGPT on 29-Jul-2025 (too bad).
+            loss = 0.0 * next(nn_model.parameters()).sum()
+
+            _idx_batch_first, _idx_batch_last = b*batch_size, min((b+1)*batch_size, len(sample_indices))
+            _batch_size = _idx_batch_last - _idx_batch_first
+            for sample in sample_indices[_idx_batch_first:_idx_batch_last]:
+                # Parse the sample into its different components
+                state = learner.getTransitionState(sample)
+                action = learner.getTransitionAction(sample)
+                reward = learner.getTransitionReward(sample)
+                next_state = learner.getTransitionNextState(sample)
+                visit_counts[state, action] += 1
+
+                # TD error
+                if learner.useSeparateModelForTargetV():
+                    V_target = reward - learner.getAverageReward() + learner.getV_target().getValue(next_state)
+                else:
+                    V_target = reward - learner.getAverageReward() + learner.getV().getValue(next_state)
+                delta = V_target - learner.getV().getValue(state)
+
+                # Contribution to the loss
+                loss += learner.getV()._compute_loss(state, delta)
+
+                # Learn the advantage function
+                # IMPORTANT: It's crucial to reduce the learning rate by the visit count if we don't want the advantage function values to explode!
+                # Ex: without reduction, A(s,a) values for the 3x4 gridworld with no obstacles is ~600, whereas with reduction, A(s,a) ~6 (i.e. 100 times smaller!!)
+                A_vector = np.zeros(learner.env.getNumStates() * learner.env.getNumActions(), dtype=float)
+                A_vector[learner.A.getLinearIndex(state, action)] = 1.0
+                alpha = max(alpha_min, alpha_ini / visit_counts[state, action])
+                learner.A.updateWeights(state, action, delta, multiplier_delta=alpha * A_vector)
+            loss = loss / _batch_size
+
+            # Perform one optimizer step
+            learner.getV().optimizer.zero_grad()
+            loss.backward()
+            learner.getV().optimizer.step()
+
+        # Update TARGET V(s) model at the end of the epoch
+        if learner.useSeparateModelForTargetV():
+            learner.updateTargetModels()
+
+        # Store the loss at the end of each training epoch
+        loss_values_train[epoch] = loss.item()
+    if verbose:
+        print("DONE!")
+
+    # if plot:
+    #     xydata = line.get_xydata()[-1]  # -1 gives the last point in the last line added to the plot
+    #     line = ax.plot([xydata[0], epoch + 1], [xydata[1], loss.cpu().detach().float()], 'r-')[0]
+    #     ax.set_xlabel("Epoch")
+    #     ax.set_ylabel("Loss (MSE)")
+    #     ax.autoscale(axis='y')  # Re-scale the vertical axis to the new range
+    #     if ylim is not None:
+    #         ax.set_ylim(ylim)
+    #     if realtime_update:
+    #         plt.pause(0.0000001)
+    #     plt.draw()
+
+    return loss_values_train
+
+
 if __name__ == "__main__":
     import copy
     import pandas as pd
@@ -990,7 +1154,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     import Python.lib.agents as agents
-    from Python.lib.agents.learners import LearningCriterion, LearningTask
+    from Python.lib.agents.learners import LearningCriterion, LearningTask, LearningMode
     from Python.lib.agents.learners.episodic.discrete import td, fv
     from Python.lib.agents.policies.parameterized import PolNN
     from Python.lib.environments.gridworlds import EnvGridworld2D_Random
@@ -1046,11 +1210,12 @@ if __name__ == "__main__":
         env2d.plot()
 
         # Value function learner characteristics
-        plot = True
+        plot = False
         use_neural_network = True
         use_separate_model_for_target_V = True
-        learner_type = "fv"
-        lr = 1E-2
+        learning_mode = LearningMode.BATCH; batch_size = 50; epochs = 50; sampling_rate = 0.5; oversample = True
+        learner_type = "td"
+        lr = 1E-3
         nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
         nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
         nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env2d.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
@@ -1089,12 +1254,13 @@ if __name__ == "__main__":
         learning_task = LearningTask.CONTINUING
         learning_criterion = LearningCriterion.AVERAGE
         gamma = 1.0
-        lmbda = 0.7
+        lmbda = 0.0
         # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
         # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
         # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
         alpha_ini = 1.0 #1.0 if learner_type == "td" or not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
-        print(f"Initial alpha = {alpha_ini} and then alpha(t) >= {alpha_ini/10}")
+        alpha_min = 0.0 if learning_mode == LearningMode.BATCH else alpha_ini/10
+        print(f"Initial alpha = {alpha_ini} and then alpha(t) >= {alpha_min}")
 
         # Learner (TD)
         learner_td = td.LeaTDLambda( env2d,
@@ -1107,7 +1273,7 @@ if __name__ == "__main__":
                                      alpha=alpha_ini,
                                      adjust_alpha=True, #not use_neural_network,  # We should NOT adjust the learning rate when using neural networks because the learning rate is defined by the NN optimizer (e.g. Adam)
                                      adjust_alpha_by_episode=False,
-                                     alpha_min=alpha_ini/10,
+                                     alpha_min=alpha_min,
                                      debug=False)
         agent_td = agents.GenericAgent(policy_nn, learner_td)
         sim_td = Simulator(env2d, agent_td, debug=debug)
@@ -1129,7 +1295,7 @@ if __name__ == "__main__":
                                 alpha=alpha_ini,
                                 adjust_alpha=True, #not use_neural_network, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
                                 adjust_alpha_by_episode=False,
-                                alpha_min=alpha_ini/10,
+                                alpha_min=alpha_min,
                                 debug=False)
         agent_fv = agents.GenericAgent(policy_nn, learner_fv)
         sim_fv = Simulator(env2d, agent_fv, debug=debug)
@@ -1146,21 +1312,51 @@ if __name__ == "__main__":
         # Simulation
         if learner_type == "fv":
             V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
-                sim_fv.run(max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,
-                                                use_average_reward_stored_in_learner=True, use_fixed_average_reward=False,
-                                                seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
-            # Plot
-            test_utils.plot_estimated_state_value_function(env2d, sim_fv.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_fv.getAgent().getLearner().getStateCounts(), alphas=sim_fv.getAgent().getLearner().getAlphasByState())
+                sim_fv.run(learning_mode=learning_mode,
+                           max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,
+                           use_average_reward_stored_in_learner=True, use_fixed_average_reward=False,
+                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
+            sim = sim_fv
         else:
-            T = 1500 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy
+            T = 1000 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy
             #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
             V, Q, A, state_counts, _, _, learning_info = \
-                sim_td.run(max_time_steps=T,
+                sim_td.run(learning_mode=learning_mode,
+                           max_time_steps=T,
                            use_fixed_average_reward=False, estimated_average_reward=0.0,
                            seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
-            # Plot
-            test_utils.plot_estimated_state_value_function(env2d, sim_td.getAgent().getLearner().getV().getValues(), learning_criterion, state_counts=sim_td.getAgent().getLearner().getStateCounts(), alphas=sim_td.getAgent().getLearner().getAlphasByState())
-        plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T}")
+            sim = sim_td
+
+        if False and learning_mode == LearningMode.BATCH:   # `if False` because the BATCH learning is already done by the Simulator.run() method!
+            # Learn NOW!
+            learner = sim.getAgent().getLearner()
+            loss_values_train = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, alpha_ini=alpha_ini, alpha_min=alpha_min, seed=seed, verbose=True)
+            plt.figure()
+            plt.plot(np.arange(1, len(loss_values_train)+1), loss_values_train, 'r.-')
+            plt.gca().set_xlabel("Epoch")
+            plt.gca().set_ylabel("Loss")
+            plt.title(f"Training loss for {learner_type.upper()}")
+            plt.show()
+
+        # Plot
+        ax_V, ax_alphas = test_utils.plot_estimated_state_value_function(env2d, sim.getAgent().getLearner().getV().getValues(), learning_criterion,
+                                                                         state_counts=sim.getAgent().getLearner().getStateCounts(), alphas=sim.getAgent().getLearner().getAlphasByState())
+        plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T} (Mode = {learning_mode.name})")
+
+        # Plot the advantage function and V(s) on top of it
+        learner = sim.getAgent().getLearner()
+        ax = plt.figure().subplots(1, 1)
+        ax.plot(np.arange(0, len(learner.getA().getValues()), 4), learner.getV().getValues() - np.mean(learner.getV().getValues()), 'r.-')
+        ax2 = ax.twinx()
+        ax2.plot(learner.getA().getValues(), 'g.-')
+        ax.set_xlabel("(s,a)")
+        ax.set_ylabel("V(s)")
+        ax2.set_ylabel("A(s,a)")
+        # Labels for actions
+        for i in np.arange(len(learner.A.getValues())):
+            ax2.text(i, learner.A.getValues()[i], str(np.mod(i, 4) + 1), verticalalignment="bottom", color="black", fontsize=8)
+        plt.title(f"V(s) and A(s,a) for {learner_type.upper()}")
+        plt.show()
 
     elif env_type == Environment.MountainCar:
         # NOTE: (2025/07/09) Use discrete_state=True in order to test the trickier case where the physical state (x, v) and the simulation state (1D index) are NOT the same

@@ -12,11 +12,12 @@ from enum import Enum, unique
 import numpy as np
 from matplotlib import pyplot as plt, cm
 
-from Python.lib.agents.learners import LearningCriterion, LearningTask, ResetMethod
+from Python.lib.agents.learners import LearningCriterion, LearningTask, LearningMode, ResetMethod
 from Python.lib.agents.learners.episodic.discrete import Learner, AlphaUpdateType
 
 from Python.lib.utils.basic import set_numpy_options, reset_numpy_options
 import Python.lib.utils.plotting as plotting
+
 
 @unique  # Unique enumeration values (i.e. on the RHS of the equal sign)
 class AdaptiveLambdaType(Enum):
@@ -52,7 +53,7 @@ class LeaTDLambda(Learner):
     """
 
     def __init__(self, env,
-                 dict_function_approximations: dict=None, use_separate_model_for_target_V=False, update_period_model_for_target_V: int=100,
+                 dict_function_approximations: dict=None, use_separate_model_for_target_V=True, update_period_model_for_target_V: int=100,
                  task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=False, alpha_min=0., func_adjust_alpha=None,
@@ -139,6 +140,7 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn(self, t, state, action, next_state, reward, done, info):
+        self.store_transition(t, state, action, next_state, reward)
         if info.get('update_trajectory_and_average_reward', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # This is the case when using episodes under a continuing learning task context: in that case, the value functions
@@ -156,69 +158,70 @@ class LeaTDLambda(Learner):
         # See the comment for the environment_set attribute in the GenericLearner class for a couple of use cases.
         super().updateKnownEnvironmentSet({state, next_state})
 
-        # IMPORTANT: (2025/08/18) We do NOT perform this update step here because the value of `t` is NOT always the total number of simulation steps taken so far, as t may represent the time step within the episode.
-        # Update target model if the period has been fulfilled
-        # (We use `t+1` and NOT `t` because the first learning step has t = 0 and we do NOT want to update the target model at the very beginning)
-        # Also, this allows the update of the model parameters at the end of an episode, since at that point t = -1 (see call to self.learn() in _run_single() and _run_single_continuing_task())
-        #if not self.V.isTabular() and (t + 1) % self.update_period_model_for_target_V == 0:
-        #    self.V_target.setModelParameters(self.V.getModelParameters())
+        if self.V.isTabular() or info.get('learning_mode', LearningMode.ONLINE) == LearningMode.ONLINE:
+            # IMPORTANT: (2025/08/18) We do NOT perform this update step here because the value of `t` is NOT always the total number of simulation steps taken so far, as t may represent the time step within the episode.
+            # Update target model if the period has been fulfilled
+            # (We use `t+1` and NOT `t` because the first learning step has t = 0 and we do NOT want to update the target model at the very beginning)
+            # Also, this allows the update of the model parameters at the end of an episode, since at that point t = -1 (see call to self.learn() in _run_single() and _run_single_continuing_task())
+            #if not self.V.isTabular() and (t + 1) % self.update_period_model_for_target_V == 0:
+            #    self.V_target.setModelParameters(self.V.getModelParameters())
 
-        # Compute the delta values used for the update of each value function
-        # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
-        # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
-        # function that computes the delta values increases DRY implementation.
-        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
+            # Compute the delta values used for the update of each value function
+            # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
+            # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
+            # function that computes the delta values increases DRY implementation.
+            delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
 
-        #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self.getAlphaForState(state)))
-        # Store the learning rates to be used in the value functions update
-        self.store_learning_rate(self.getAlphasByState())
-        # Update the eligibility trace
-        self._updateZ(state, action, self.lmbda, delta_V=delta_V, delta_Q=delta_Q)
-        # Update the action value functions
-        # IMPORTANT: (2024/08/12) For the continuous state case that uses neural networks to approximate value functions,
-        # we need to update Q first and then V o.w. we get the error that I do NOT understand:
-        # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation?"
-        # More info:
-        # - https://github.com/pytorch/pytorch/issues/39141
-        # - https://stackoverflow.com/questions/57631705/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modi
-        self._updateQ(delta_Q, state=state, action=action)
+            #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self.getAlphaForState(state)))
+            # Store the learning rates to be used in the value functions update
+            self.store_learning_rate(self.getAlphasByState())
+            # Update the eligibility trace
+            self._updateZ(state, action, self.lmbda, delta_V=delta_V, delta_Q=delta_Q)
+            # Update the action value functions
+            # IMPORTANT: (2024/08/12) For the continuous state case that uses neural networks to approximate value functions,
+            # we need to update Q first and then V o.w. we get the error that I do NOT understand:
+            # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation?"
+            # More info:
+            # - https://github.com/pytorch/pytorch/issues/39141
+            # - https://stackoverflow.com/questions/57631705/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modi
+            self._updateQ(delta_Q, state=state, action=action)
 
-        # Update the state value function
-        # Retrieve the V(s) value BEFORE its update, in order to use it for the TRUE online TD(lambda) used by self._updateA_GAE()
-        # to compute the Generalized Advantage Estimation (GAE)
-        V_old = self.V.getValue(state)
-        self._updateV(delta_V, state=state)
-        # From Sutton, page 300, where they talk about TRUE online TD(lambda)
-        # This is an approximation of the actual difference in V(S(t)) before and after the update,
-        # because rigorously we should use V_new_minus_old = V_t(S(t)) - V_{t-1}(S(t)) and here we are using V_new_minus_old = V_{t+1}(S(t)) - V_t(S(t)),
-        # but it should be perfectly fine.
-        V_new_minus_old = self.V.getValue(state) - V_old
+            # Update the state value function
+            # Retrieve the V(s) value BEFORE its update, in order to use it for the TRUE online TD(lambda) used by self._updateA_GAE()
+            # to compute the Generalized Advantage Estimation (GAE)
+            V_old = self.V.getValue(state)
+            self._updateV(delta_V, state=state)
+            # From Sutton, page 300, where they talk about TRUE online TD(lambda)
+            # This is an approximation of the actual difference in V(S(t)) before and after the update,
+            # because rigorously we should use V_new_minus_old = V_t(S(t)) - V_{t-1}(S(t)) and here we are using V_new_minus_old = V_{t+1}(S(t)) - V_t(S(t)),
+            # but it should be perfectly fine.
+            V_new_minus_old = self.V.getValue(state) - V_old
 
-        # Update the advantage function
-        self._updateA_GAE(delta_V, state=state, action=action, V_new_minus_old=V_new_minus_old)
-        #self._updateA(delta_V, state=state, action=action)
-        #self._deprecated_updateA(state, action, delta_V)
+            # Update the advantage function
+            self._updateA_GAE(delta_V, state=state, action=action, V_new_minus_old=V_new_minus_old)
+            #self._deprecated_updateA(state, action, delta_V)
+            #self._updateA(delta_V, state=state, action=action)
 
-        # We store the effective learning rates alpha
-        # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
-        if self.V.isTabular():
-            # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
-            _alphas = self.getAlphasByState()
-        else:
-            # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
-            # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
-            # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
-            _alphas = self.getAlphaForState(state)
-        self._alphas_effective = np.r_[self._alphas_effective, (_alphas * self._z_V).reshape(1, len(self._z_V))]
-            ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
-            ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
-            ## is the number of states which should be laid out across the columns when appending a new row to
-            ## _alphas_effective using np.r_[].
+            # We store the effective learning rates alpha
+            # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
+            if self.V.isTabular():
+                # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
+                _alphas = self.getAlphasByState()
+            else:
+                # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
+                # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
+                # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
+                _alphas = self.getAlphaForState(state)
+            self._alphas_effective = np.r_[self._alphas_effective, (_alphas * self._z_V).reshape(1, len(self._z_V))]
+                ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
+                ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
+                ## is the number of states which should be laid out across the columns when appending a new row to
+                ## _alphas_effective using np.r_[].
 
-        # Update alpha for the next iteration for "by state counts" update
-        #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
-        if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
-            self._update_alphas(state, action)
+            # Update alpha for the next iteration for "by state counts" update
+            #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
+            if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
+                self._update_alphas(state, action)
 
         if done and info.get('update_trajectory_and_average_reward', True):
             # TEMPORARY-2025/01/14: The condition on 'update_trajectory_and_average_reward' was added today and is linked to the current implementation of the CONTINUING average reward
@@ -305,10 +308,11 @@ class LeaTDLambda(Learner):
         # (over all possible actions) as it is done by the Expected SARSA learning of the Q function.
         # This avoids having to choose a particular next action for which we would require a new parameter
         # such as the epsilon value of the epsilon-greedy next action strategy.
-        if self.use_separate_model_for_target_V:
+        if not self.V.isTabular() and self.use_separate_model_for_target_V:
             V_target_value = reward + self.gamma * self.V_target.getValue(next_state) #- np.mean(self.V_target.getValues())
             V_value = self.V.getValue(state) #- np.mean(self.V.getValues())
         else:
+            # Tabular case and NN case with NO target V(s) model
             V_target_value = reward + self.gamma * self.V.getValue(next_state)
             V_value = self.V.getValue(state)
         delta_V = V_target_value - V_value
@@ -560,7 +564,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     
     def __init__(self, env,
                  dict_function_approximations=None,
-                 use_separate_model_for_target_V=False, update_period_model_for_target_V=100,
+                 use_separate_model_for_target_V=True, update_period_model_for_target_V=100,
                  task=LearningTask.EPISODIC, criterion=LearningCriterion.DISCOUNTED, alpha=0.1, gamma=1.0, lmbda=0.8,
                  adjust_alpha=False, alpha_update_type=AlphaUpdateType.EVERY_STATE_VISIT,
                  adjust_alpha_by_episode=True, alpha_min=0., func_adjust_alpha=None,
@@ -669,6 +673,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn(self, t, state, action, next_state, reward, done, info):
+        self.store_transition(t, state, action, next_state, reward)
         if info.get('update_trajectory_and_average_reward', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.

@@ -27,7 +27,7 @@ from matplotlib.ticker import MaxNLocator
 from scipy.special import rel_entr
 
 from Python.lib.agents.learners import ResetMethod
-from Python.lib.agents.learners import LearningCriterion, LearningTask
+from Python.lib.agents.learners import LearningCriterion, LearningTask, LearningMode
 from Python.lib.agents.learners.policies import LeaActorCriticNN
 from Python.lib.agents.policies import probabilistic
 
@@ -975,6 +975,7 @@ adjust_optimizer_learning_rate = False; t_learn_min_to_adjust_optimizer_learning
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # 2) Parameters about VALUE FUNCTION learning (Critic)
+critic_learning_mode = LearningMode.ONLINE #LearningMode.BATCH #LearningMode.ONLINE
 # DM-2025/08/16: The alpha_initial parameter is now set when we define the value function approximation strategy
 #alpha_initial = 1.0 #simulator_value_functions.getAgent().getLearner().getInitialLearningRate()      # NOTE: alpha_initial is NOT used when learning the value functions by function approximation, as this is set by the default learning rate of the Adam optimizer
 adjust_alpha_initial_by_learning_step = False; t_learn_min_to_adjust_alpha = 30 # based at 1 (regardless of the base value used for t_learn)
@@ -1361,6 +1362,7 @@ for learning_method in learning_methods:
                             estimate_absorption_set_at_this_step = estimate_absorption_set_at_every_step
                     V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
                         simulator_value_functions.run(t_learn=t_learn,
+                                                      learning_mode=critic_learning_mode,
                                                       max_time_steps=max_time_steps_fv_overall,
                                                       max_time_steps_for_absorbed_particles_check=max_time_steps_fv_for_all_particles,
                                                       min_prop_absorbed_particles=min_prop_absorbed_particles, stopping_criterion_fv=stopping_criterion_fv,
@@ -1402,6 +1404,7 @@ for learning_method in learning_methods:
                         V, Q, A, state_counts, _, _, learning_info = \
                             simulator_value_functions.run(nepisodes=n_episodes_per_learning_step,
                                                           t_learn=t_learn,
+                                                          learning_mode=critic_learning_mode,
                                                           max_time_steps=max_time_steps_benchmark,
                                                           max_time_steps_per_episode=max_time_steps_per_policy_learning_episode,  # max_time_steps_benchmark // n_episodes_per_learning_step,
                                                           reset_value_functions=reset_value_functions_at_this_step,
@@ -1415,6 +1418,7 @@ for learning_method in learning_methods:
                         V, Q, A, state_counts, _, _, learning_info = \
                             simulator_value_functions.run(t_learn=t_learn,
                                                           max_time_steps=_max_time_steps,
+                                                          learning_mode=critic_learning_mode,
                                                           estimated_average_reward=simulator_value_functions.getAgent().getLearner().getAverageReward() if use_average_reward_from_previous_step else 0.0,
                                                           use_fixed_average_reward=use_fixed_average_reward,
                                                           reset_value_functions=reset_value_functions_at_this_step,
@@ -2126,7 +2130,7 @@ else:
 max_avg_reward = 1.0 if np.isnan(max_avg_reward) or max_avg_reward == 0.0 else max_avg_reward
 
 _exit_state_str = 'TOP' if "exit_state" in locals() and exit_state == env_shape[1] - 1 else 'BOTTOM' if "exit_state" in locals() else "(unknown)"
-_value_functions_estimation = f"NN Input {nn_input_value_functions.name}, hidden: {nn_hidden_layer_sizes_value_functions}" if use_function_approximation else "TABULAR"
+_value_functions_estimation = f"NN Input {nn_input_value_functions.name}, hidden: {nn_hidden_layer_sizes_value_functions}, Mode: {critic_learning_mode.name}" if use_function_approximation else "TABULAR"
 _learning_characteristics = f"\nN={'N' in locals() and N or _N}, " + \
                             f"T={'T' in locals() and T or _T}, " + \
                             f"MAX budget={'max_time_steps_benchmark' in locals() and max_time_steps_benchmark or 'N/A'} steps\n" + \

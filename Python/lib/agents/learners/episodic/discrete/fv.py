@@ -118,7 +118,7 @@ class LeaFV(LeaTDLambda):
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
                  dict_function_approximations: dict=None,
-                 use_separate_model_for_target_V=False,
+                 use_separate_model_for_target_V=True,
                  update_period_model_for_target_V: int=100,
                  task=LearningTask.CONTINUING,
                  criterion=LearningCriterion.AVERAGE,
@@ -1331,6 +1331,9 @@ class LeaFV(LeaTDLambda):
     def getNumTimeStepsForExpectation(self):
         return self.T
 
+    def getOriginalNumTimeStepsForExpectation(self):
+        return self._T_at_construction
+
     def getAbsorptionSet(self):
         return self.absorption_set
 
@@ -1473,7 +1476,7 @@ class LeaFVAdaptive(LeaFV, LeaTDLambdaAdaptive):
                  probas_stationary_start_state_et: dict=None,
                  probas_stationary_start_state_fv: dict=None,
                  dict_function_approximations: dict=None,
-                 use_separate_model_for_target_V=False,
+                 use_separate_model_for_target_V=True,
                  update_period_model_for_target_V: int=100,
                  task=LearningTask.CONTINUING,
                  criterion=LearningCriterion.AVERAGE,

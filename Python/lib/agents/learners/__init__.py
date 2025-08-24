@@ -31,10 +31,12 @@ class ResetMethod(Enum):
     RANDOM_UNIFORM = 2
     RANDOM_NORMAL = 3
 
+
 @unique
 class AlphaUpdateType(Enum):
     FIRST_STATE_VISIT = 1
     EVERY_STATE_VISIT = 2
+
 
 @unique
 class LearnerTypes(Enum):
@@ -42,6 +44,7 @@ class LearnerTypes(Enum):
     V = 'state_value'
     Q = 'state_action_value'
     P = 'policy'
+
 
 @unique
 class LearningCriterion(Enum):
@@ -57,6 +60,7 @@ class LearningCriterion(Enum):
     AVERAGE = 2
     TOTAL = 3
 
+
 @unique
 class LearningTask(Enum):
     """
@@ -68,6 +72,14 @@ class LearningTask(Enum):
     """
     EPISODIC = 1
     CONTINUING = 2
+
+
+@unique
+class LearningMode(Enum):
+    "Types of value function learning modes: ONLINE or BATCH"
+    ONLINE = 1
+    BATCH = 2
+
 
 
 # Identity function: used to define the default transformation function of the counter (n) that adjusts alpha
@@ -189,6 +201,8 @@ class GenericLearner:
                                 # containing the episodic rewards in the Learner class.
                                 # Taking a look at the Learner.store_trajectory_at_episode_end() method may also be helpful
                                 # to better understand the issues just described.
+        self.transitions = deque([])    # Transitions information that can be used to learn value functions in batch, by sampling from this list after the simulation is over.
+                                        # Each transition is stored as a tuple (time, state, action, reward, next_state).
 
         # Count of visited states and visited state-actions
         # Depending on the type of learner (e.g. learner of V or learner of Q) one ore the other will be updated.
@@ -217,7 +231,7 @@ class GenericLearner:
         #   (see method update_absorption_set_if_not_too_large() in discrete.Simulator for an example of its actual use).
         self.environment_set = set()
 
-    def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_average_reward=True, reset_trajectory=True, reset_counts=True):
+    def reset(self, reset_learning_epoch=True, reset_alphas=True, reset_value_functions=True, reset_average_reward=True, reset_trajectory=True, reset_transitions=True, reset_counts=True):
         """
         Resets the variables that store information about the learning process
 
@@ -252,6 +266,11 @@ class GenericLearner:
             Whether to reset the information of the trajectory (states, actions, rewards).
             default: True
 
+        reset_transitions: (opt) bool
+            Whether to reset the history of transitions observed by the simulation.
+            This is normally required ONLY at the beginning of the simulation process.
+            default: False
+
         reset_counts: (opt) bool
             Whether to reset the counters (of e.g. the states or the action-states).
             default: True
@@ -269,8 +288,8 @@ class GenericLearner:
 
         if reset_alphas:
             self.alpha_t = self.alpha
-            self.alpha_mean = deque([])
-            self.alphas = deque([])
+            self.alpha_mean.clear()
+            self.alphas.clear()
 
         if reset_value_functions:
             # Only reset the initial estimates of the value functions when requested
@@ -284,14 +303,20 @@ class GenericLearner:
         if reset_trajectory:
             self.reset_trajectory()
 
+        if reset_transitions:
+            self.reset_transitions()
+
         if reset_counts:
             self.reset_counts()
 
     def reset_trajectory(self):
-        self.times = deque([])
-        self.states = deque([])
-        self.actions = deque([])
-        self.rewards = deque([])
+        self.times.clear()
+        self.states.clear()
+        self.actions.clear()
+        self.rewards.clear()
+
+    def reset_transitions(self):
+        self.transitions.clear()
 
     # Overrides superclass method
     def reset_counts(self):
@@ -332,6 +357,10 @@ class GenericLearner:
             # Add a DEEP copy of alpha in case it is an object, o.w. all elements in self.alphas will end up to be the same!!
             # Note that copy.deecopy(<scalar>) works fine
             self.alphas += [copy.deepcopy(alpha)]
+
+    def store_transition(self, t, state, action, next_state, reward):
+        "Store the transition in the `transitions` list as a tuple (time, state, action, reward, next_state)"
+        self.transitions.append((t, state, action, reward, next_state))
 
     def update_learning_epoch(self):
         """
@@ -480,6 +509,9 @@ class GenericLearner:
     def getInitialLearningRate(self):
         return self.alpha
 
+    def getMinimumLearningRate(self):
+        return self.alpha_min
+
     def getLearningCriterion(self):
         "Returns the learning criterion, i.e. one of the possible values of LearningCriterion enum (e.g. AVERAGE, DISCOUNTED)"
         return self.criterion
@@ -541,6 +573,41 @@ class GenericLearner:
         # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
         return list(self.rewards)
 
+    def getTransitions(self):
+        "Returns the transitions stored in the object as a list of tuples (time, state, action, reward, next_state)"
+        return self.transitions
+
+    def getTransitionsAsDataFrame(self):
+        "Returns the list of transitions stored in the object as a data frame with columns `t`, `s`, `a`, `r`, `ns`"
+        return pd.DataFrame(list(self.getTransitions()), columns=['t', 's', 'a', 'r', 'ns'])
+
+    def getTransitionState(self, idx_transition):
+        "Returns the state stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][1]
+
+    def getTransitionAction(self, idx_transition):
+        "Returns the action stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][2]
+
+    def getTransitionReward(self, idx_transition):
+        "Returns the reward stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][3]
+
+    def getTransitionNextState(self, idx_transition):
+        "Returns the next state stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][4]
+
+    def getTransitionNonZeroRewards(self):
+        "Returns the non-zero rewards stored in the transitions history and their indices"
+        indices = deque([])
+        rewards = deque([])
+        for i in range(len(self.transitions)):
+            r = self.getTransitionReward(i)
+            if r != 0.0:
+                indices.append(i)
+                rewards.append(r)
+        return indices, rewards
+
     def getAverageReward(self):
         return self.average_reward
 
@@ -564,3 +631,6 @@ class GenericLearner:
         in subsequent learning moments carried out with the same learner.
         """
         self.sample_size_initial_reward_stored_in_learner = sample_size
+
+    def setTransitions(self, transitions):
+        self.transitions = transitions

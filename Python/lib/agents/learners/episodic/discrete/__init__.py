@@ -162,7 +162,7 @@ class Learner(GenericLearner):
         default: False
     """
     def __init__(self, env,
-                 dict_function_approximations: dict = None, use_separate_model_for_target_V=False, update_period_model_for_target_V: int=100,
+                 dict_function_approximations: dict = None, use_separate_model_for_target_V=True, update_period_model_for_target_V: int=100,
                  task: LearningTask=LearningTask.EPISODIC,
                  criterion: LearningCriterion=LearningCriterion.DISCOUNTED,
                  gamma: float=1.0,
@@ -277,10 +277,14 @@ class Learner(GenericLearner):
         # Only reset the initial estimates of the value functions at the very first episode (the episode counter starts at 1)
         # (since each episode should leverage what the agent learned so far!)
         if self.episode == 1 or reset_value_functions or reset_average_reward:
-            # Reset all the learning information by calling the super class reset, which is generic, i.e. it does NOT assume episodic tasks
+            # Reset all the learning information by calling the super class reset method, which is generic, i.e. it does NOT assume episodic tasks
             # Note that such super class calls the reset_value_function() method defined in the specific class that is inheriting from the super class!
             # So, in this case, it ends up calling the reset_value_functions() defined below!!
-            super().reset(reset_learning_epoch=True, reset_alphas=True, reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward, reset_trajectory=True, reset_counts=True)
+            super().reset(reset_learning_epoch=True, reset_alphas=True,
+                          reset_value_functions=reset_value_functions, reset_average_reward=reset_average_reward,
+                          # Note: the transitions are reset when the VALUE FUNCTIONS are reset, mainly such that transitions are NOT reset before starting the FV simulation
+                          # I did this because I do not want (at this moment) to add a new parameter to the reset() methods called reset_transitions.
+                          reset_trajectory=True, reset_transitions=reset_value_functions, reset_counts=True)
 
     def setParams(self, alpha, adjust_alpha, alpha_update_type, adjust_alpha_by_episode, alpha_min):
         self.alpha = alpha if alpha is not None else self.alpha

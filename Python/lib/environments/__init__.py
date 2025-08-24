@@ -221,12 +221,15 @@ class EnvironmentDiscrete(discrete.DiscreteEnv):
         "Returns the multidimensional state indices representing the actual environment state associated to the 1D state index"
         raise NotImplementedError
 
-    def getIndexFromState(self, state):
+    def getIndexFromState(self, state, simulation=True):
         """
         Returns the 1D index representation of the given environment state
 
-        In this class the two state representations coincide
-        because states in the EnvironmentDiscrete class are defined by their 1D index representation
+        In this class the two state representations coincide because states in the EnvironmentDiscrete class are defined by their 1D index representation.
+        Thus, with no further information about the environment structure, the method always returns the input `state`, regardless of the value of `simulation`.
+
+        However, the method can be overridden by subclasses that implement a meaningful transformation of `state` using information about the environment structure.
+        Ex: a 2D gridworld where `state` is a 2D tuple when simulation=False.
 
         This method must be defined because it is used by simulators in order to go from the actual representation of the environment
         (which could be a physical continuous-valued state, as in the Mountain Car) to the index representation of a discretized version of the environment,
