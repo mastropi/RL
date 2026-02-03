@@ -74,18 +74,21 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'K': 5, 'J': 2, 'N': 5, 'T': 20,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.0, 'E(T) (MC)': 1.98926, '#E(T) (MC)': 44, '#events_MC': 100,
+          'Pr(MCP)': 0.0, '#events_MCP': 100,
           'Pr(FV)': 0.0103065, 'E(T)': 7.06, '#E(T)': 4, 'Tmax': 28.2, 'Tend': 41.2, 'Smax': 4.6,
           '#events_ET': 39, '#events_FV': 44}),
         (2, DEFAULT_EXECUTION, 'Moderate K',
          {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.00031823, 'E(T) (MC)': 50.02, '#E(T) (MC)': 2866, '#events_MC': 200E3,
+          'Pr(MCP)': 0.00031812, '#events_MCP': 200E3,
           'Pr(FV)': 0.00047179, 'E(T)': 243.54, '#E(T)': 11, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
           '#events_ET': 4004, '#events_FV': 8164}),
         (3, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
          {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.0, 'E(T) (MC)': 3.9979, '#E(T) (MC)': 1, '#events_MC': 800E3,
+          'Pr(MCP)': 0.0, '#events_MCP': 800E3,
           'Pr(FV)': 9.619e-05, 'E(T)': 3.99, '#E(T)': 1, 'Tmax': 4.0, 'Tend': 2809.3, 'Smax': 1.1,
           '#events_ET': 4029, '#events_FV': 792}),
 
@@ -96,6 +99,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.0, 'E(T) (MC)': 1.99389, '#E(T) (MC)': 40, '#events_MC': 100,
+          'Pr(MCP)': 0.0, '#events_MCP': 100,
           'Pr(FV)': np.nan, 'E(T)': np.nan, '#E(T)': 2, 'Tmax': 28.2, 'Tend': 41.2, 'Smax': 4.6,
           '#events_ET': 39, '#events_FV': 0}),
         (5, DEFAULT_EXECUTION, 'Moderate K',
@@ -103,6 +107,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.00031819, 'E(T) (MC)': 49.99, '#E(T) (MC)': 2864, '#events_MC': 200E3,
+          'Pr(MCP)': 0.00031812, '#events_MCP': 200E3,
           'Pr(FV)': 0.000418716, 'E(T)': 274.41, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
           '#events_ET': 4004, '#events_FV': 8164}),
         (6, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
@@ -110,11 +115,12 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
          {'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
+          'Pr(MCP)': 0.0, '#events_MCP': 800E3,
           'Pr(FV)': 0.0, 'E(T)': 188.35, '#E(T)': 13, 'Tmax': 2676.9, 'Tend': 2899.0, 'Smax': 21.9,
           '#events_ET': 4005, '#events_FV': 14758}),
 
         # Third set of results
-        # Better estimation than above because in addition item (a) is no longer true, i.e. now P(T>t) is estimated from the *N particles* used in the FV simulation
+        # Better estimation than above because in addition item (a) is no longer true, i.e '#events_MCP': 100,. now P(T>t) is estimated from the *N particles* used in the FV simulation
         # (and in some cases because the parameter values are larger, e.g. larger number of particles)
         (7, DEFAULT_EXECUTION, 'Small K',
          {'K': 5, 'J': 3, 'N': 80, 'T': 200,
@@ -124,6 +130,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             # And this is most likely due to a large estimated E(T) value... which should have been ~ 5 (see above tests),
             # but it turned out to be 8.65... why??
          {'Pr(MC)': 0.0617052, 'E(T) (MC)': 3.49, '#E(T) (MC)': 3330, '#events_MC': 16000,
+          'Pr(MCP)': 0.0616380, '#events_MCP': 16000,
           'Pr(FV)': 0.0408603, 'E(T)': 6.98, '#E(T)': 32, 'Tmax': 287.8, 'Tend': 288.9, 'Smax': 12.7,
           '#events_ET': 382, '#events_FV': 1723}),
         (8, DEFAULT_EXECUTION, 'Moderate K',
@@ -131,6 +138,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
          {'Pr(MC)': 0.000242275, 'E(T) (MC)': 48.66, '#E(T) (MC)': 5865, '#events_MC': 400E3,
+          'Pr(MCP)': 0.000242256, '#events_MCP': 400E3,
           'Pr(FV)': 0.000163620, 'E(T)': 268.36, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 74.5,
           '#events_ET': 4004, '#events_FV': 25386}),
         (9, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
@@ -138,6 +146,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 4,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
          {'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
+          'Pr(MCP)': 0.0, '#events_MCP': 800E3,
           'Pr(FV)': 9.83671e-08, 'E(T)': 188.10, '#E(T)': 13, 'Tmax': 2676.9, 'Tend': 2899.0, 'Smax': 65.0,
           '#events_ET': 4005, '#events_FV': 44191}),
     )
@@ -153,13 +162,13 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             job_rates = self.dict_env_queue_mm_single_server[K].getJobClassRates()
             service_rates = self.dict_env_queue_mm_single_server[K].getServiceRates()
             proba_blocking_mc, expected_reward, probas_stationary, n_cycles_used_for_probas_estimation, \
-                expected_return_time, n_return_cycles, time_mc, n_events_mc = run_mc_estimation_single_server(   self.dict_env_queue_mm_single_server[K],
-                                                                                                       dict_params['K'],
-                                                                                                       dict_params['J'],
-                                                                                                       dict_params['N'] * dict_params['T'],
-                                                                                                       dict_params['burnin_time_steps'],
-                                                                                                       dict_params['min_num_cycles_for_expectations'],
-                                                                                                       seed=1313)
+                expected_return_time, n_return_cycles, time_mc, n_events_mc = run_mc_estimation_single_server( self.dict_env_queue_mm_single_server[K],
+                                                                                                               dict_params['K'],
+                                                                                                               dict_params['J'],
+                                                                                                               dict_params['N'] * dict_params['T'],
+                                                                                                               dict_params['burnin_time_steps'],
+                                                                                                               dict_params['min_num_cycles_for_expectations'],
+                                                                                                               seed=1313)
 
             rhos = list(np.array(job_rates) / np.array(service_rates))
             print(get_current_datetime_as_string())
@@ -205,6 +214,63 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             # Consistency assertions
             assert np.isnan(proba_blocking_mc) and np.isnan(probas_stationary[K]) or \
                    np.isclose(proba_blocking_mc, probas_stationary[K])
+
+    @data_provider(data_test_EnvQueueSingleServer_MetMCFV_SeveralCapacities)
+    def test_EnvQueueSingleServer_MetMCP_SeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):
+        "Test the Monte-Carlo PARALLEL implementation of the blocking probability of a single-server queue system"
+        if run:
+            print("\n*** Testing {}, case number {}: '{}' ***".format(self.id(), casenum, desc))
+            K = dict_params['K']
+            nservers = self.dict_env_queue_mm_single_server[K].getNumServers()
+            job_rates = self.dict_env_queue_mm_single_server[K].getJobClassRates()
+            service_rates = self.dict_env_queue_mm_single_server[K].getServiceRates()
+            proba_blocking_mcp, expected_reward, probas_stationary, time_mcp, n_events_mcp = run_mc_estimation_single_server(  self.dict_env_queue_mm_single_server[K],
+                                                                                                                               dict_params['K'],
+                                                                                                                               dict_params['J'],
+                                                                                                                               dict_params['N'] * dict_params['T'],
+                                                                                                                               dict_params['burnin_time_steps'],
+                                                                                                                               dict_params['min_num_cycles_for_expectations'],
+                                                                                                                               N=1, #dict_params['N'],
+                                                                                                                               seed=1313)
+
+            rhos = list(np.array(job_rates) / np.array(service_rates))
+            print(get_current_datetime_as_string())
+            print("EXECUTION PARAMETERS:")
+            print("- # servers: {}".format(nservers))
+            print("- job arrival rates at servers: {}".format(job_rates))
+            print("- service rates: {}".format(service_rates))
+            print("- capacity: {}".format(K))
+            print("- loads: {}".format(rhos))
+            print("- absorption set size: {}".format(dict_params['J']))
+            print("- # arrival time steps: {}".format(dict_params['T']))
+            print("")
+
+            print("ESTIMATION RESULTS:")
+            print("- Blocking probability Pr(K={}) = {}".format(K, proba_blocking_mcp))
+            print("- Stationary probability Pr(K={}) = {}".format(K, probas_stationary[K]))
+            assert np.isnan(proba_blocking_mcp) and np.isnan(probas_stationary[K]) or \
+                   np.isclose(proba_blocking_mcp, probas_stationary[K])
+            print("- Number of observed events = {}".format(n_events_mcp))
+
+            # True stationary probability of blocking
+            x, dist = stationary_distribution_product_form(K, rhos, func_prod_birthdeath)
+            proba_blocking_true = np.sum([v for xx, v in zip(x, dist) if xx[0] in probas_stationary.keys()])
+            print("")
+            print("- Stationary blocking probability = {}".format(proba_blocking_mcp))
+            print("- TRUE stationary blocking probability = {}".format(proba_blocking_true))
+
+            # Check system setup is the one required to obtain the expected results
+            assert nservers == 1, "Number of servers is 1"
+            assert list(job_rates) == [0.7], "Arrival rate is 0.7"
+            assert list(service_rates) == [1.0], "Service rate is 1.0"
+
+            # Assertions
+            assert np.isnan(proba_blocking_mcp) and np.isnan(dict_expected['Pr(MCP)']) or \
+                   np.isclose(proba_blocking_mcp, dict_expected['Pr(MCP)'])
+            self.assertEqual(n_events_mcp, dict_expected['#events_MCP'])
+            # Consistency assertions
+            assert np.isnan(proba_blocking_mcp) and np.isnan(probas_stationary[K]) or \
+                   np.isclose(proba_blocking_mcp, probas_stationary[K])
 
     @data_provider(data_test_EnvQueueSingleServer_MetMCFV_SeveralCapacities)
     def test_EnvQueueSingleServer_MetFV_SeveralCapacities(self, casenum, run, desc, dict_params, dict_expected):

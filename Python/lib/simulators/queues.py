@@ -50,7 +50,7 @@ class LearningMode(Enum):
                                 # as given by expression 13.8 in Sutton, pag. 327 or expression (9) in Massaro et al.
                                 # This is the REINFORCE algorithm.
     REINFORCE_TRUE = 2          # When learning is based on the TRUE expected value of the gradient of the average reward (or of the average state value)
-                                # as given in expression (8) in Massaro et al.
+                                # as given in expression (8) in Massaro et al. (i.e. the expression of the TRUE expected gradient is p(x) (Q(x,a=1) - Q(x,a=0)) in the problem presented in Massaro et al.)
                                 # Note that the GRADIENTS of the average reward and of the average state value coincide... NOT the values before the calculation of the gradient.
                                 # (i.e. in general the average reward is DIFFERENT from the average state value, although in some cases they may coincide --e.g. exercise 10.6 in Sutton, pag. 251)
     IGA = 3                     # When learning is based on Integer Gradient Ascent, where delta(theta) is +/- 1 or 0.
@@ -3158,6 +3158,8 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
 
     # Compute the total sojourn time at each state or buffer size of interest and the corresponding stationary probability
     for s in states_or_buffer_sizes_of_interest:
+        # Note: The zip() below combines two lists of different lengths, as the second list has one fewer element than the first list, as it is the result of an np.diff() operation
+        # However, the zip() operation puts together the FIRST elements of each list until the common length of the two lists is reached.
         total_sojourn_time_at_state_or_buffer_size_of_interest =\
             np.sum([st for x, st in zip(states_or_buffer_sizes_until_end_of_last_cycle, sojourn_times_until_end_of_last_cycle)
                     if x == s])
@@ -3172,6 +3174,368 @@ def estimate_stationary_probabilities_mc(env, agent, burnin_time=0, min_num_cycl
     expected_cycle_time = total_cycle_time / n_cycles
 
     return probas_stationary, expected_cycle_time, n_cycles
+
+
+def estimate_blocking_mcp(env, agent, dict_params_simul, dict_params_info, start_queue_state=None):
+    """
+    Estimates the blocking probability using Monte-Carlo PARALLEL simulator, i.e. simulating N copies (particles) of the given environment in parallel.
+    The blocking probability is estimated with two methods:
+    - the vanilla estimator that computes the average time that each particle is in the blocking state.
+    - an estimator that computes the proportion of particles that hit the blocking state in the given budget.
+
+    For more details of the estimation process, see the documentation for estimate_stationary_probabilities_mcp().
+
+    Arguments:
+    env: Queue environment
+        Queue environment where the simulation runs.
+
+    agent: Agent
+        Agent that interacts with the environment.
+        It should have the getLearnerV() method defined.
+
+    simul: SimulatorQueue
+        Simulation object used for the simulation that allows estimating the blocking probability.
+
+    dict_params_simul: dict
+        Dictionary containing simulation and estimation parameters.
+        The dictionary should contain the keys described in function `parse_simulation_parameters()`.
+
+    dict_params_info: dict
+        Dictionary containing information to display, or parameters to deal with the information to display.
+
+    start_queue_state: (opt) int or tuple or numpy array
+        Queue state at which the queue environment starts for the simulation.
+        Its type depends on how the queue environment defines the state of the system.
+        default: None, in which case the start state is randomly chosen among the states of the absorption set defined
+        either by the entry 'absorption_set' of the `dict_params_simul` parameter, or derived from the buffer size
+        defined in entry 'buffer_size_activation' of such dictionary as dict_params_simul['buffer_size_activation'] - 1.
+        Note that this start state is used to obtain a fair comparison of the Monte-Carlo estimation method with the
+        Fleming-Viot estimation method, as it makes both methods start at a state in the boundary of the absorption set A,
+        and this is the reason we need the parameter defining the set of absorption set A to be passed as part of the
+        `dict_params_simul` dictionary.
+
+    Return: tuple
+    Tuple with the following elements:
+    - proba_blocking: the estimated blocking probability.
+    - expected_reward: the estimated expected reward.
+    - probas_stationary_blocking: dictionary with the estimated stationary probability for each queue state or buffer size where
+    blocking may occur.
+    - time_last_event: time of the last event (continuous-time) observed during the Monte-Carlo simulation.
+    - n_events: number of events observed during the Monte-Carlo simulation used to estimate the stationary probabilities.
+    """
+    # -- Parse input parameters
+    dict_params_simul = parse_simulation_parameters(dict_params_simul, env)
+
+    # Set the simulation seed
+    # Note that, although the seed is set by the queue environment (via its set_seed() method which is called by run_simulation_mc() below)
+    # we also need to set the seed here because, before calling run_simulation_mc(), we choose below the initial queue state
+    # on which the simulation starts randomly, among all possible states in the absorption set.
+    np.random.seed(dict_params_simul['seed'])
+
+    # Reset environment and learner of the value functions
+    # IMPORTANT: We should NOT reset the learner of the policy because this function could be called as part of a
+    # policy learning process! Note that the learner of the value function V MUST be reset regardless of this because
+    # at this point a new queue simulation starts and at that point the value function should be learned anew.
+    env.reset()
+    if agent.getLearnerV() is not None:
+        agent.getLearnerV().reset()
+
+    # Selection of the queue start state out of the set of absorption states in order to have a fair comparison
+    # with the Fleming-Viot method where particles are reactivated when they reach a state in the absorption set.
+    if start_queue_state is None:
+        start_queue_state = dict_params_simul['absorption_set'].random_choice()
+    start_state = (start_queue_state, None)
+    # -- Parse input parameters
+
+    t, time_last_event = \
+        run_simulation_mcp(env, agent, dict_params_info.get('t_learn', 0), start_state, dict_params_simul['T'],
+                          seed=dict_params_simul['seed'],
+                          verbose=dict_params_info.get('verbose', False), verbose_period=dict_params_info.get('verbose_period', 1))
+    probas_stationary_blocking = \
+        estimate_stationary_probabilities_mcp(env, agent, time_last_event,
+                                             burnin_time=dict_params_simul['burnin_time'])
+
+    # -- Compute the other quantities that are returned to the outside world
+    # Blocking probability and expected reward
+    n_events = t
+    assert n_events == dict_params_simul['T']
+    proba_blocking = compute_proba_blocking(env, agent, probas_stationary_blocking)
+    expected_reward = estimate_expected_reward(env, agent, probas_stationary_blocking)
+
+    return proba_blocking, expected_reward, probas_stationary_blocking, time_last_event, n_events
+
+
+@measure_exec_time
+def run_simulation_mcp(env, agent, t_learn, start_state, t_sim_max, seed=None, verbose=False, verbose_period=1):
+    """
+    Runs the continuous-time simulation using Monte-Carlo PARALLEL
+
+    Arguments:
+    agent: Agent
+        Agent object that is responsible of performing the actions on the environment and learning from them.
+
+    t_learn: int
+        The learning time step to which the simulation will contribute.
+
+    start_state: Queue-environment-dependent
+        (Environment) State at which the queue environment starts for the simulation.
+        Its type depends on how the queue environment defines the state of the system.
+        Ex: when the queue is of class GenericEnvQueueWithJobClasses, the state is a tuple with the following information:
+        (queue_state, job_class) = (state of the queue itself, class of the arriving job).
+
+    t_sim_max: int
+        Maximum simulation *time steps* allowed for the simulation (equivalent to the number of observed events)
+        when track_absorptions=False (which we assume it indicates that this function is called as part of the
+        Monte-Carlo estimation of the blocking probability)
+        OR maximum number of *arrival events* when track_absorption=True (which we assume it indicates that
+        this function is called as part of the Fleming-Viot estimation of the blocking probability).
+        Note that its meaning is different in one case and the other because in the Fleming-Viot case,
+        the number of arrivals, and NOT the number of events, is the one that determines the expected error
+        in the estimation of E(T_A), which is due to the fact that the expected reabsorption time is normally larger
+        than the expected return time to J-1 (as, in order to be reabsorbed, the particle first needs to exit
+        the absorption set A) (for further details, see calculations in my green small notebok written on 06-Nov-2022).
+
+    seed: (opt) int
+        Seed to use in the simulation process.
+        default: None, in which case the simulation cannot be reproduced at a later stage
+
+    verbose: (opt) bool
+        Whether to be verbose in the simulation process.
+        default: False
+
+    verbose_period: (opt) int
+        The time step period to be verbose.
+        default: 1 => be verbose at every simulation step.
+
+    Return: tuple
+    - t: the last time step (integer-valued) of the simulation process.
+    - time_abs: the continuous (absolute) time of the last observed event during the simulation.
+    """
+    # -- Parse input parameters
+    t_max = t_sim_max
+
+    # Seed
+    if seed is not None:
+        env.set_seed(seed)
+
+    # Set the start state of the environment to the given start state
+    env.setState(start_state)
+    buffer_size_start = env.getBufferSize()
+    if verbose:
+        print("MC simulation: The queue environments starts at state {} (buffer size = {})" \
+              .format(env.getState(), buffer_size_start))
+
+    # Store the initial position as part of the trajectory
+    update_trajectory_and_average_reward(agent, (t_learn - 1) * (t_max + 1) + 0, 0.0, env.getState(), None, 0.0)
+
+    # Time step in the queue trajectory (the first time step is t = 0)
+    done = False
+    t = 0
+    t_arrivals = 0  # Number of arrival events. Used to decide the end of the simulation, when track_absorptions = True
+    time_abs = 0.0  # Measure of the ABSOLUTE time of the latest event (as opposed to the time relative to the latest event)
+    if DEBUG_ESTIMATORS:
+        # Check realization of the arrival and service rates
+        time_last_arrival = 0.0
+        if buffer_size_start == 0:
+            time_last_service = np.nan
+        else:
+            time_last_service = 0.0
+        jobs_arrival = []               # Class of the arrived jobs
+        times_inter_arrival = []
+        servers_service = []            # Server number at which each job is served
+        times_service = []
+    while not done:
+        t += 1
+
+        # Current state
+        state = env.getState()
+
+        # Generate next event
+        # Note: this function takes care of NOT generating a service event when a server is empty.
+        time, event, job_class_or_server, _ = generate_event([env])
+        time_abs += time
+        if False: #DEBUG_TRAJECTORIES:
+            print("[MC] Time step t = {}: Exponential time generated: {:.3f} --> ABS time = {:.3f}".format(t, time, time_abs))
+
+        # Analyze the event
+        if event == Event.BIRTH:
+            # The event is an incoming job class
+            # => Update the state of the queue, apply the acceptance policy, and finally the server assignment policy
+            t_arrivals += 1
+            action, next_state, reward, gradient_for_action = manage_job_arrival(t, env, agent, state, job_class_or_server)
+
+            # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
+            assert env.getQueueStateFromState(next_state) == env.getQueueState()
+
+            if DEBUG_ESTIMATORS:
+                # TODO: (2022/10/16) Fix this so that the inter-arrival rates are recorded correctly, i.e. separately for EACH JOB CLASS
+                # Currently, this is not the case, as the inter-arrival times are computed w.r.t. the last time of arrival of ANY JOB CLASS.
+                # In order to fix this, we need to define the time_last_arrival as a list with as many elements as job classes.
+                jobs_arrival += [job_class_or_server]
+                times_inter_arrival += [time_abs - time_last_arrival]
+                # Prepare for the next iteration
+                time_last_arrival = time_abs
+                if env.getBufferSize() == 1:
+                    # The queue can now experience a service
+                    # => Set the last service time to the last event time, so that we can measure the next
+                    # service time when it occurs.
+                    time_last_service = time_abs
+
+        elif event == Event.DEATH:
+            # The event is a completed service
+            # => Update the state of the queue
+            action, next_state, reward = manage_service(env, agent, state, job_class_or_server)
+
+            # Note that the state of the environment has been updated by the manage_service() function, that's why env.getQueueState() returns the value of `next_state` above
+            assert env.getQueueStateFromState(next_state) == env.getQueueState()
+
+            if DEBUG_ESTIMATORS:
+                assert not np.isnan(time_last_service)
+                servers_service += [job_class_or_server]
+                times_service += [time_abs - time_last_service]
+                # Prepare for the next iteration
+                if env.getBufferSize() == 0:
+                    # The queue can now longer experience a service event
+                    time_last_service = np.nan
+                else:
+                    time_last_service = time_abs
+
+        # Update the trajectory used in the learning process, where we store:
+        # S(t): state BEFORE an action is taken
+        # A(t): action taken given the state S(t)
+        # R(t): reward received by taking action A(t) and transition to S(t+1)
+        update_trajectory_and_average_reward(agent, (t_learn - 1) * (t_max + 1) + t, time_abs, next_state, action, reward)
+
+        if DEBUG_TRAJECTORIES:
+            print("[MC] {} | t={}: time={:.3f}, event={}, action={} -> state={}, reward={:.3f}" \
+                  .format(state, t, time_abs, event, action, next_state, reward), end="\n")
+
+        done = check_done(t_max, t, state, action, reward)
+
+    # DONE
+    if show_messages(verbose, verbose_period, t_learn):
+        print("[MC] ==> agent ENDS at time t={} at state {} coming from state = {}, action = {}, reward = {}, gradient = {})" \
+              .format(t, env.getState(), state, action, reward, gradient_for_action))
+
+    if DEBUG_ESTIMATORS:
+        # Distribution of inter-arrival and service times and their mean
+        # NOTE: (2022/10/16) This only works when there is only ONE server in the system
+        # (because the way `job_rates_by_server` is used in analyze_event_times() assumes this.
+        job_assignment_policy = agent.getAssignmentPolicy() if agent.getAssignmentPolicy() is not None \
+                                else define_uniform_job_assignment_policy(len(env.getJobClassRates()), env.getNumServers())
+        job_rates_by_server = compute_job_rates_by_server(env.getJobClassRates(),
+                                                          env.getNumServers(),
+                                                          job_assignment_policy.getProbabilisticMap())
+        analyze_event_times(job_rates_by_server, times_inter_arrival, jobs_arrival, group_name="Job class")
+        analyze_event_times(env.getServiceRates(), times_service, servers_service, group_name="Server")
+
+        results_str = "{} times (initial state = {}, initial buffer size = {})\nn = {}, mean = {:.3f}, SE = {:.3f}" \
+                      .format(type_of_times, start_state, buffer_size_start, x_n, np.mean(x_values), np.std(x_values) / np.sqrt(x_n))
+        assert len(x_values) == x_n
+        assert np.isclose(x_total / x_n, np.mean(x_values))
+        fig = plt.figure()
+        plt.hist(x_values, bins=30, color="red")
+        axes = fig.get_axes()
+        #axes[0].set_xscale('log')      # Use this in case we want to see a potential outlier at low values
+        axes[0].set_title(results_str)
+
+    return t, time_abs
+
+
+def estimate_stationary_probabilities_mcp(env, agent, time_last_event, burnin_time=0):
+    """
+    Monte-Carlo PARALLEL estimation of the stationary probability at states of interest (defined by the agent's job acceptance policy)
+    from the observed trajectory in continuous time (stored in the agent's learner).
+
+    The stationary probability is estimated in two different ways:
+    - as the fraction of time spent at each state of interest by each particle (after removal of a possibly non-zero burn-in time),
+    divided by the total simulation time.
+    - as the fraction of particles that hit the state of interest within the simulation budget.
+
+    Arguments:
+    env: environment
+        The queue environment where the agent acts.
+
+    agent: Agent
+        The agent interacting with the environment in terms of job acceptance/rejection.
+        It should have a learner of the value function V and a learner of the policy P defined.
+        It should also store the observed trajectory while exploring the environment from a simulation already run
+        (which is used to estimate the stationary probabilities).
+
+    time_last_event: float
+        Time (continuous) of the last observed event.
+        This is used as divisor of the probability estimators.
+
+    burnin_time: float
+        Continuous time to be used for burn-in, i.e. in which the process is assumed to still not be stationary,
+        and therefore the observed event times in that initial period should be excluded.
+
+    Return: dict
+    Dictionary with the estimated stationary probability for the states of interest,
+    typically those where blocking may occur (deterministically or non-deterministically) according to the agent's job acceptance policy.
+    """
+
+    # -- Auxiliary functions
+    def get_events_after_burnin(env, agent, burnin_time):
+        "Returns the times and queue states (events) after the burn-in time"
+        # Event times and states (BEFORE the event occurs)
+        times = agent.getLearnerV().getTimes()
+        states = agent.getLearnerV().getStates()
+
+        # Remove any times and states occurring before the burn-in time
+        idx_first_after_burnin = -1
+        for idx, t in enumerate(times):
+            if t >= burnin_time:
+                idx_first_after_burnin = idx
+                break
+
+        if burnin_time == 0.0:
+            assert idx_first_after_burnin == 0
+
+        if idx_first_after_burnin == -1:
+            return idx_first_after_burnin, [], []
+
+        # Lists containing the event times, the states before those event times and
+        # the buffer sizes associated to those states happening AFTER the burn-in time
+        times_after_burnin = times[idx_first_after_burnin:]
+        states_after_burnin = [env.getQueueStateFromState(s) for s in states[idx_first_after_burnin:]]
+
+        return idx_first_after_burnin, times_after_burnin, states_after_burnin
+
+    def get_sojourn_times(times: list):
+        sojourn_times = np.diff(times)
+        return sojourn_times
+    # -- Auxiliary functions
+
+    # Get the states or buffer sizes on which the stationary probability should be estimated
+    states_or_buffer_sizes_of_interest = get_blocking_states_or_buffer_sizes(env, agent)
+
+    # Initialize the output objects to NaN in case their values cannot be reliably estimated
+    # (because of no time after the burn-in time)
+    probas_stationary = dict()
+    for s in states_or_buffer_sizes_of_interest:
+        probas_stationary[s] = np.nan
+
+    idx_first_after_burnin, times_after_burnin, states_after_burnin = get_events_after_burnin(env, agent, burnin_time)
+    if idx_first_after_burnin == -1:
+        warnings.warn("No events were observed after the initial burn-in time ({:.3f})," \
+                      " therefore stationary probability estimates are set to NaN." \
+                      "\nTry increasing the simulation time.".format(burnin_time))
+        return probas_stationary
+
+    assert len(times_after_burnin) > 0 and len(states_after_burnin) == len(times_after_burnin)
+
+    # Compute the total sojourn time at each state or buffer size of interest and the corresponding stationary probability
+    total_simulation_time = time_last_event
+    for s in states_or_buffer_sizes_of_interest:
+        # Note: The zip() below combines two lists of different lengths, as the second list has one fewer element than the first list, as it is the result of an np.diff() operation
+        # However, the zip() operation puts together the FIRST elements of each list until the common length of the two lists is reached.
+        total_sojourn_time_at_state_or_buffer_size_of_interest = \
+            np.sum([st for x, st in zip(states_after_burnin, get_sojourn_times(times_after_burnin))
+                    if x == s])
+        probas_stationary[s] = total_sojourn_time_at_state_or_buffer_size_of_interest / total_simulation_time
+
+    return probas_stationary
 
 
 def get_blocking_states_or_buffer_sizes(env, agent):

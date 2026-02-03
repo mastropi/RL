@@ -37,7 +37,7 @@ import Python.lib.deprecated_estimators as estimators
 
 from Python.lib.simulators.queues import compute_nparticles_and_narrivals_for_fv_process, \
     compute_nparticles_and_nsteps_for_fv_process_many_settings, compute_rel_errors_for_fv_process, \
-    define_queue_environment_and_agent, estimate_blocking_fv, estimate_blocking_mc, SurvivalProbabilityEstimation
+    define_queue_environment_and_agent, estimate_blocking_fv, estimate_blocking_mc, estimate_blocking_mcp, SurvivalProbabilityEstimation
 
 from Python.lib.utils.basic import aggregation_bygroups, get_current_datetime_as_string, get_datetime_from_string, \
     is_scalar, measure_exec_time, set_pandas_options, reset_pandas_options
@@ -56,6 +56,7 @@ class Process(Enum):
 @measure_exec_time
 def run_mc_estimation_single_server(env_queue, K, J, T,
                                     burnin_time_steps, min_num_cycles_for_expectations,
+                                    N=1,
                                     seed=1717):
     """
     Test the Monte-Carlo estimation of the blocking probability of a single-server system
@@ -71,11 +72,18 @@ def run_mc_estimation_single_server(env_queue, K, J, T,
         Smallest buffer size of the queue where the queue is still active (i.e. not absorbed).
         Absorption happens at buffer size = J - 1.
 
-    N: int
-        Number of particles of the Fleming-Viot system.
-
     T: int
         Number of arrivals at which the simulation stops.
+
+    burnin_time_steps: int
+        Number of time steps to use as burn-in before collecting estimation information.
+
+    min_num_cycles_for_expectations: int
+        Minimum number of cycles to observe for the estimation of expectations (e.g. the expected cycle time).
+
+    N: (opt) int
+        Number of simulators (particles) to run in parallel.
+        default: 1
 
     seed: int
         Seed to use for the pseudo-random number generation.
@@ -97,14 +105,19 @@ def run_mc_estimation_single_server(env_queue, K, J, T,
     # Simulation parameters
     dict_params_simul = dict({'buffer_size_activation': J,  # J-1 is the absorption buffer size
                               'T': T,  # number of arrivals at which the simulation stops
+                              'N': N,  # number of parallel instances of the simulator
                               'burnin_time_steps': burnin_time_steps,
                               'min_num_cycles_for_expectations': min_num_cycles_for_expectations,
                               'seed': seed})
     dict_params_info = dict()
 
     # Run the simulation!
-    return estimate_blocking_mc(env_queue, agent_accept_reject,
-                                dict_params_simul, dict_params_info)
+    if N < 1:
+        return estimate_blocking_mc(env_queue, agent_accept_reject,
+                                    dict_params_simul, dict_params_info)
+    else:
+        return estimate_blocking_mcp(env_queue, agent_accept_reject,
+                                    dict_params_simul, dict_params_info)
 
 
 @measure_exec_time

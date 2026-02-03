@@ -117,7 +117,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
     def test_Env_MetMCwithReinforceTrue(self):
         print("".join(np.repeat("*", 20)))
         print("\nRunning test " + self.id())
-        print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
+        print("Testing the MC algorithm on a single server system using the REINFORCE_TRUE learning strategy (see LearningMode enum)...")
 
         # Light execution parameters
         dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
@@ -184,7 +184,7 @@ class Test_EstPolicy_EnvQueueSingleServer(unittest.TestCase):
     def test_Env_MetFVRLwithReinforceTrue(self):
         print("".join(np.repeat("*", 20)))
         print("\nRunning test " + self.id())
-        print("Testing the FVRL algorithm on a single server system using the REINFORCE_TRUE learning strategy...")
+        print("Testing the FVRL algorithm on a single server system using the REINFORCE_TRUE learning strategy (see LearningMode enum)...")
 
         # Light execution parameters
         dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'g.-'})
@@ -435,7 +435,7 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
     def test_Env_MetMCwithReinforceTrue(self):
         print("".join(np.repeat("*", 20)))
         print("\nRunning test " + self.id())
-        print("Testing the MC algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy...")
+        print("Testing the MC algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy (see LearningMode enum)...")
 
         # Light execution parameters
         dict_params_info = dict({'plot': False, 'log': False, 'symbol': 'r.-'})
@@ -516,7 +516,7 @@ class Test_EstPolicy_EnvQueueLossNetworkWithJobClasses(unittest.TestCase):
     def test_Env_MetFVRLwithReinforceTrue(self):
         print("".join(np.repeat("*", 20)))
         print("\nRunning test " + self.id())
-        print("Testing the FVRL algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy...")
+        print("Testing the FVRL algorithm on a loss network system receiving multi-class jobs using the REINFORCE_TRUE learning strategy (see LearningMode enum)...")
         print("Optimum theta and expected cost for loss network system: {}".format(self.dict_optimum_expected_cost))
 
         # Light execution parameters
