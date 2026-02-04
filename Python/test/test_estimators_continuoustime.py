@@ -73,21 +73,24 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
         (1, DEFAULT_EXECUTION, 'Small K',
          {'K': 5, 'J': 2, 'N': 5, 'T': 20,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': 0.0, 'E(T) (MC)': 1.98926, '#E(T) (MC)': 44, '#events_MC': 100,
+         {'Pr(True)': 0.49432244189999974,  # Computed as rho**K * (1 - rho**(K+1)) / (1 - rho)
+          'Pr(MC)': 0.0, 'E(T) (MC)': 1.98926, '#E(T) (MC)': 44, '#events_MC': 100,
           'Pr(MCP)': 0.0, '#events_MCP': 100,
           'Pr(FV)': 0.0103065, 'E(T)': 7.06, '#E(T)': 4, 'Tmax': 28.2, 'Tend': 41.2, 'Smax': 4.6,
           '#events_ET': 39, '#events_FV': 44}),
         (2, DEFAULT_EXECUTION, 'Moderate K',
-         {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
+         {'K': 20, 'J': 10, 'N': 100, 'T': 2000,    # (2026/02/02) Use perhaps 5100 = 3000 * (mu + lambda) = expected number of events in [0, T], where 3000 is what we calculated with Ernesto for K = 18 to have a good probability of reaching K from x=0.
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': 0.00031823, 'E(T) (MC)': 50.02, '#E(T) (MC)': 2866, '#events_MC': 200E3,
+         {'Pr(True)': 0.0026582566219095173,
+          'Pr(MC)': 0.00031823, 'E(T) (MC)': 50.02, '#E(T) (MC)': 2866, '#events_MC': 200E3,
           'Pr(MCP)': 0.00031812, '#events_MCP': 200E3,
           'Pr(FV)': 0.00047179, 'E(T)': 243.54, '#E(T)': 11, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
           '#events_ET': 4004, '#events_FV': 8164}),
         (3, False, 'Large K',   # (2023/11/12) We do NOT execute the simulation for large K because it takes too long and it is essentially the same as for moderate K... The only difference would be to consider cases where there are not enough samples to estimate quantities (but this already pass as of today)
          {'K': 40, 'J': 35, 'N': 400, 'T': 2000,
           'burnin_time_steps': 0, 'min_num_cycles_for_expectations': 0, 'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': 0.0, 'E(T) (MC)': 3.9979, '#E(T) (MC)': 1, '#events_MC': 800E3,
+         {'Pr(True)': 2.12226764112464e-06,
+          'Pr(MC)': 0.0, 'E(T) (MC)': 3.9979, '#E(T) (MC)': 1, '#events_MC': 800E3,
           'Pr(MCP)': 0.0, '#events_MCP': 800E3,
           'Pr(FV)': 9.619e-05, 'E(T)': 3.99, '#E(T)': 1, 'Tmax': 4.0, 'Tend': 2809.3, 'Smax': 1.1,
           '#events_ET': 4029, '#events_FV': 792}),
@@ -98,7 +101,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'K': 5, 'J': 2, 'N': 5, 'T': 20,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': 0.0, 'E(T) (MC)': 1.99389, '#E(T) (MC)': 40, '#events_MC': 100,
+         {'Pr(True)': 0.49432244189999974,
+          'Pr(MC)': 0.0, 'E(T) (MC)': 1.99389, '#E(T) (MC)': 40, '#events_MC': 100,
           'Pr(MCP)': 0.0, '#events_MCP': 100,
           'Pr(FV)': np.nan, 'E(T)': np.nan, '#E(T)': 2, 'Tmax': 28.2, 'Tend': 41.2, 'Smax': 4.6,
           '#events_ET': 39, '#events_FV': 0}),
@@ -106,7 +110,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'K': 20, 'J': 10, 'N': 100, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': 0.00031819, 'E(T) (MC)': 49.99, '#E(T) (MC)': 2864, '#events_MC': 200E3,
+         {'Pr(True)': 0.0026582566219095173,
+          'Pr(MC)': 0.00031819, 'E(T) (MC)': 49.99, '#E(T) (MC)': 2864, '#events_MC': 200E3,
           'Pr(MCP)': 0.00031812, '#events_MCP': 200E3,
           'Pr(FV)': 0.000418716, 'E(T)': 274.41, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 47.3,
           '#events_ET': 4004, '#events_FV': 8164}),
@@ -114,13 +119,14 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'K': 40, 'J': 12, 'N': 400, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_M_CYCLES},
-         {'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
+         {'Pr(True)': 2.12226764112464e-06,
+          'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
           'Pr(MCP)': 0.0, '#events_MCP': 800E3,
           'Pr(FV)': 0.0, 'E(T)': 188.35, '#E(T)': 13, 'Tmax': 2676.9, 'Tend': 2899.0, 'Smax': 21.9,
           '#events_ET': 4005, '#events_FV': 14758}),
 
         # Third set of results
-        # Better estimation than above because in addition item (a) is no longer true, i.e '#events_MCP': 100,. now P(T>t) is estimated from the *N particles* used in the FV simulation
+        # Better estimation than above because in addition item (a) is no longer true, i.e now P(T>t) is estimated from the *N particles* used in the FV simulation
         # (and in some cases because the parameter values are larger, e.g. larger number of particles)
         (7, DEFAULT_EXECUTION, 'Small K',
          {'K': 5, 'J': 3, 'N': 80, 'T': 200,
@@ -129,7 +135,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             # NOTE: (2022/11/01) The estimated probability is too small compared to the true value...
             # And this is most likely due to a large estimated E(T) value... which should have been ~ 5 (see above tests),
             # but it turned out to be 8.65... why??
-         {'Pr(MC)': 0.0617052, 'E(T) (MC)': 3.49, '#E(T) (MC)': 3330, '#events_MC': 16000,
+         {'Pr(True)': 0.49432244189999974,
+          'Pr(MC)': 0.0617052, 'E(T) (MC)': 3.49, '#E(T) (MC)': 3330, '#events_MC': 16000,
           'Pr(MCP)': 0.0616380, '#events_MCP': 16000,
           'Pr(FV)': 0.0408603, 'E(T)': 6.98, '#E(T)': 32, 'Tmax': 287.8, 'Tend': 288.9, 'Smax': 12.7,
           '#events_ET': 382, '#events_FV': 1723}),
@@ -137,7 +144,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'K': 20, 'J': 10, 'N': 200, 'T': 2000,
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 5,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
-         {'Pr(MC)': 0.000242275, 'E(T) (MC)': 48.66, '#E(T) (MC)': 5865, '#events_MC': 400E3,
+         {'Pr(True)': 0.0026582566219095173,
+          'Pr(MC)': 0.000242275, 'E(T) (MC)': 48.66, '#E(T) (MC)': 5865, '#events_MC': 400E3,
           'Pr(MCP)': 0.000242256, '#events_MCP': 400E3,
           'Pr(FV)': 0.000163620, 'E(T)': 268.36, '#E(T)': 9, 'Tmax': 2678.9, 'Tend': 2900.6, 'Smax': 74.5,
           '#events_ET': 4004, '#events_FV': 25386}),
@@ -145,7 +153,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
          {'K': 40, 'J': 12, 'N': 400, 'T': 2000,    # The value of J was tuned here in order to obtain sufficient samples for the estimation of E(T) so that the estimated probability is NOT NaN
           'burnin_time_steps': 10, 'min_num_cycles_for_expectations': 4,
           'method_survival_probability_estimation': SurvivalProbabilityEstimation.FROM_N_PARTICLES},
-         {'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
+         {'Pr(True)': 2.12226764112464e-06,
+          'Pr(MC)': 0.0, 'E(T) (MC)': 100.71, '#E(T) (MC)': 5681, '#events_MC': 800E3,
           'Pr(MCP)': 0.0, '#events_MCP': 800E3,
           'Pr(FV)': 9.83671e-08, 'E(T)': 188.10, '#E(T)': 13, 'Tmax': 2676.9, 'Tend': 2899.0, 'Smax': 65.0,
           '#events_ET': 4005, '#events_FV': 44191}),
@@ -209,8 +218,8 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
                    np.isclose(proba_blocking_mc, dict_expected['Pr(MC)'])
             assert np.isnan(expected_return_time) and np.isnan(dict_expected['E(T) (MC)']) or \
                    np.isclose(expected_return_time, dict_expected['E(T) (MC)'], atol=0.01)
-            self.assertEqual(n_return_cycles, dict_expected['#E(T) (MC)'])
-            self.assertEqual(n_events_mc, dict_expected['#events_MC'])
+            self.assertEqual(dict_expected['#E(T) (MC)'], n_return_cycles)
+            self.assertEqual(dict_expected['#events_MC'], n_events_mc)
             # Consistency assertions
             assert np.isnan(proba_blocking_mc) and np.isnan(probas_stationary[K]) or \
                    np.isclose(proba_blocking_mc, probas_stationary[K])
@@ -267,7 +276,7 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
             # Assertions
             assert np.isnan(proba_blocking_mcp) and np.isnan(dict_expected['Pr(MCP)']) or \
                    np.isclose(proba_blocking_mcp, dict_expected['Pr(MCP)'])
-            self.assertEqual(n_events_mcp, dict_expected['#events_MCP'])
+            self.assertEqual(dict_expected['#events_MCP'], n_events_mcp)
             # Consistency assertions
             assert np.isnan(proba_blocking_mcp) and np.isnan(probas_stationary[K]) or \
                    np.isclose(proba_blocking_mcp, probas_stationary[K])
@@ -338,12 +347,12 @@ class Test_EstAverageValueV_EnvQueueSingleServer(unittest.TestCase):
                    np.isclose(proba_blocking_fv, dict_expected['Pr(FV)'])
             assert np.isnan(expected_absorption_time) and np.isnan(dict_expected['E(T)']) or \
                    np.isclose(expected_absorption_time, dict_expected['E(T)'], atol=0.01)  # places = decimal places
-            self.assertEqual(n_absorption_time_observations, dict_expected['#E(T)'])
-            self.assertAlmostEqual(time_last_absorption, dict_expected['Tmax'], places=1)
-            self.assertAlmostEqual(time_end_simulation_et, dict_expected['Tend'], places=1)
-            self.assertAlmostEqual(max_survival_time, dict_expected['Smax'], places=1)
-            self.assertEqual(n_events_et, dict_expected['#events_ET'])
-            self.assertEqual(n_events_fv_only, dict_expected['#events_FV'])
+            self.assertEqual(dict_expected['#E(T)'], n_absorption_time_observations)
+            self.assertAlmostEqual(dict_expected['Tmax'], time_last_absorption, places=1)
+            self.assertAlmostEqual(dict_expected['Tend'], time_end_simulation_et, places=1)
+            self.assertAlmostEqual(dict_expected['Smax'], max_survival_time, places=1)
+            self.assertEqual(dict_expected['#events_ET'], n_events_et)
+            self.assertEqual(dict_expected['#events_FV'], n_events_fv_only)
             # Consistency assertions
             assert np.isnan(proba_blocking_fv) and np.isnan(probas_stationary[K]) or \
                    np.isclose(proba_blocking_fv, probas_stationary[K])
@@ -550,6 +559,7 @@ if __name__ == '__main__':
     # Create the test suites
     test_suite = unittest.TestSuite()
     test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetMC_SeveralCapacities"))
+    test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetMCP_SeveralCapacities"))
     test_suite.addTest(Test_EstAverageValueV_EnvQueueSingleServer("test_EnvQueueSingleServer_MetFV_SeveralCapacities"))
     test_suite.addTest(Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses("test_EnvQueueLossNetwork_MetMC_SingleCapacity"))
     test_suite.addTest(Test_EstAverageValueV_EnvQueueLossNetworkWithJobClasses("test_EnvQueueLossNetwork_MetFV_SingleCapacity"))

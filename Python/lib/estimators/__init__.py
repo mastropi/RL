@@ -195,3 +195,93 @@ if __name__ == "__main__":
     assert sample_size == 6
     assert sorted(dist.keys()) == sorted(dict_states_and_times.keys())
     assert np.allclose(np.array([dist[k] for k in sorted(dist.keys())]), np.array([0.33333333, 0.0, 0.666666666666, 0.0]))
+
+
+def estimate_stationary_probabilities_simple_average(env, agent, time_last_event, state_of_interest, burnin_time=0.0):
+    """
+    Estimates the stationary probability at the given state of interest,
+    using the traditional estimation of summing the time spent at the state of interest
+    divided by the total (continuous) simulation time.
+
+    Arguments:
+    env: environment
+        The queue environment where the agent acts.
+
+    agent: Agent
+        The agent interacting with the environment in terms of job acceptance/rejection.
+        It should store the observed trajectory while exploring the environment from a simulation already run
+        (which is used to estimate the stationary probabilities).
+
+    time_last_event: float
+        Time (continuous) of the last observed event.
+        This is used as divisor of the probability estimators.
+
+    state_of_interest: int or tuple
+        Integer (representing the buffer size of interest) for single server queues, or tuple for multi-server systems.
+        The state of interest is typically a state where blocking may occur (deterministically or non-deterministically)
+        according to the agent's job acceptance policy.
+
+    burnin_time: (opt) float
+        Continuous time to be used for burn-in, i.e. in which the process is assumed to still not be stationary,
+        and therefore the observed event times in that initial period should be excluded.
+        default: 0.0
+
+    Return: float in [0, 1]
+    Estimated stationary probability for the given state of interest.
+    """
+
+    # -- Auxiliary functions
+    def get_events_after_burnin(env, agent, burnin_time):
+        "Returns the times and queue states (events) after the burn-in time"
+        # Event times and states (BEFORE the event occurs)
+        times = agent.getLearnerV().getTimes()
+        states = agent.getLearnerV().getStates()
+
+        # Remove any times and states occurring before the burn-in time
+        idx_first_after_burnin = -1
+        for idx, t in enumerate(times):
+            if t >= burnin_time:
+                idx_first_after_burnin = idx
+                break
+
+        if burnin_time == 0.0:
+            assert idx_first_after_burnin == 0
+
+        if idx_first_after_burnin == -1:
+            return idx_first_after_burnin, [], []
+
+        # Lists containing the event times, the states before those event times and
+        # the buffer sizes associated to those states happening AFTER the burn-in time
+        times_after_burnin = times[idx_first_after_burnin:]
+        states_after_burnin = [env.getQueueStateFromState(s) for s in states[idx_first_after_burnin:]]
+
+        return idx_first_after_burnin, times_after_burnin, states_after_burnin
+
+    def get_sojourn_times(times: list):
+        sojourn_times = np.diff(times)
+        return sojourn_times
+    # -- Auxiliary functions
+
+    # Initialize the output probability to NaN in case its value cannot be reliably estimated
+    # (because of no time after the burn-in time)
+    proba_stationary = np.nan
+
+    idx_first_after_burnin, times_after_burnin, states_after_burnin = get_events_after_burnin(env, agent, burnin_time)
+    if idx_first_after_burnin == -1:
+        warnings.warn("No events were observed after the initial burn-in time ({:.3f})," \
+                      " therefore stationary probability estimates are set to NaN." \
+                      "\nTry increasing the simulation time.".format(burnin_time))
+        return proba_stationary
+
+    assert len(times_after_burnin) > 0 and len(states_after_burnin) == len(times_after_burnin)
+
+    # Compute the total sojourn time at each state or buffer size of interest and the corresponding stationary probability
+    total_simulation_time = time_last_event
+    # Note: The zip() below combines two lists of different lengths, as the second list has one fewer element than the first list, as it is the result of an np.diff() operation
+    # However, the zip() operation puts together the FIRST elements of each list until the common length of the two lists is reached.
+    total_sojourn_time_at_state_of_interest = \
+        np.sum([st for x, st in zip(states_after_burnin, get_sojourn_times(times_after_burnin))
+                if x == state_of_interest])
+    proba_stationary = total_sojourn_time_at_state_of_interest / total_simulation_time
+
+    return proba_stationary
