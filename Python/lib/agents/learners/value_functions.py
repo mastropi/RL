@@ -1210,12 +1210,18 @@ if __name__ == "__main__":
         env2d.plot()
 
         # Value function learner characteristics
-        plot = False
+        plot_online = False    # Generate plots during ONLINE learning
+        plot_batch = False #True
         use_neural_network = True
         use_separate_model_for_target_V = True
-        learning_mode = LearningMode.BATCH; batch_size = 50; epochs = 50; sampling_rate = 0.5; oversample = True
-        learner_type = "td"
-        lr = 1E-3
+        # Whether to use the average reward computed from the A-estimation step as a FIXED average reward (correction) value (as opposed to iteratively updated)
+        # in the FV learning of differential value functions. Note that the TD learning of the differential value functions ALWAYS uses an iterative update
+        # of the average reward because there is no warm estimate of the expected reward that could be used in its place...
+        use_fixed_average_reward_fv = True
+        #learning_mode = LearningMode.ONLINE
+        learning_mode = LearningMode.BATCH; batch_size = 50; epochs = 50; sampling_rate = 1.0; oversample = False
+        learner_type = "fv" #"td"
+        lr = 1E-2 #1E-1 #1E-2 #1E-3
         nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
         nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
         nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env2d.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
@@ -1312,22 +1318,22 @@ if __name__ == "__main__":
         # Simulation
         if learner_type == "fv":
             V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
-                sim_fv.run(learning_mode=learning_mode,
+                sim_fv.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
                            max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,
-                           use_average_reward_stored_in_learner=True, use_fixed_average_reward=False,
-                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
+                           use_average_reward_stored_in_learner=True, use_fixed_average_reward=use_fixed_average_reward_fv,
+                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
             sim = sim_fv
         else:
             T = 1000 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy
             #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
             V, Q, A, state_counts, _, _, learning_info = \
-                sim_td.run(learning_mode=learning_mode,
+                sim_td.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
                            max_time_steps=T,
                            use_fixed_average_reward=False, estimated_average_reward=0.0,
-                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot)
+                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
             sim = sim_td
 
-        if False and learning_mode == LearningMode.BATCH:   # `if False` because the BATCH learning is already done by the Simulator.run() method!
+        if learning_mode == LearningMode.BATCH: # Use `if False` when BATCH learning is already done by the Simulator.run() method (something that is hard-coded in Simulator.run())
             # Learn NOW!
             learner = sim.getAgent().getLearner()
             loss_values_train = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, alpha_ini=alpha_ini, alpha_min=alpha_min, seed=seed, verbose=True)

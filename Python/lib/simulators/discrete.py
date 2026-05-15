@@ -970,8 +970,9 @@ class Simulator:
             # for the first time, because the start state is part of a set of frequently observed states, which is how A is defined, thus delaying
             # the time when samples used to estimate E(T_A) can be taken.
             # When probas_stationary_start_state_et is None (which is the case at the very first step of a policy learning process),
-            # the start state is chosen uniformly as the set of states defined after the initial exploration of the environment in entry dict_params_simul['start_states_for_et']
-            # as long as it is not empty (it should never be empty though, because of the way it is defined above).
+            # the start state is chosen uniformly from the set of states defined after the initial exploration of the environment in entry dict_params_simul['start_states_for_et']
+            # as long as it is not empty (it should never be empty though, because of the way it is defined above, namely as the set of states visited during the exploration
+            # which are NOT part of the absorption set A).
             # Otherwise, if for some reason it happens to be empty, we set the start state to None so that the state is chosen
             # following the initial state distribution of the environment (isd) (done by the env.reset() when called in the _run_single_continuing_task() method).
             if probas_stationary_start_state_et is None or len(probas_stationary_start_state_et) == 0:
@@ -1037,7 +1038,7 @@ class Simulator:
                                 # the signal is likely to be observed early on in the simulation (because the boundary of A is close to the reward in that case
                                 # --as A contains states with zero reward) and that early signal generates instabilities in V(s) learning at the onset,
                                 # which may cause divergence (this was observed during a debugging analysis of the process by setting `debug=True` in the learner constructor).
-                                use_fixed_average_reward=True, #use_fixed_average_reward,
+                                use_fixed_average_reward=use_fixed_average_reward,
                                 reset_value_functions=reset_value_functions,
                                 epsilon_random_action=dict_params_simul['epsilon_random_action'],
                                 reward_shaping=dict_params_simul['reward_for_exit_states'] is not None,
