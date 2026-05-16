@@ -358,9 +358,14 @@ class GenericLearner:
             # Note that copy.deecopy(<scalar>) works fine
             self.alphas += [copy.deepcopy(alpha)]
 
-    def store_transition(self, t, state, action, next_state, reward):
-        "Store the transition in the `transitions` list as a tuple (time, state, action, reward, next_state)"
-        self.transitions.append((t, state, action, reward, next_state))
+    def store_transition(self, type, t, state, action, next_state, reward, eligibility_trace):
+        """
+        Store the transition in the `transitions` list as a tuple (type, time, state, action, reward, next_state, eligibility_trace),
+        where `type` is a metadata piece of information (typically "MC" or "FV" which is used to distinguish whether the transition corresponds
+        to the Monte Carlo simulation or to the Fleming-Viot simulation in a Fleming-Viot simulation process),
+        and `eligibility_trace` is an array having the dimension of the function approximation of the advantage function.
+        """
+        self.transitions.append((type, t, state, action, reward, next_state, eligibility_trace))
 
     def update_learning_epoch(self):
         """
@@ -573,29 +578,45 @@ class GenericLearner:
         # Need to convert to list because the attribute is a deque and deque do not accept slicing as lists do!
         return list(self.rewards)
 
-    def getTransitions(self):
-        "Returns the transitions stored in the object as a list of tuples (time, state, action, reward, next_state)"
-        return self.transitions
+    def getTransitions(self, type=None):
+        "Returns the transitions stored in the object as a list of tuples (type, time, state, action, reward, next_state, eligibility_trace)"
+        if type is None:
+            return self.transitions
+        else:
+            transitions2return = deque([tr for idx, tr in enumerate(self.transitions) if self.getTransitionType(idx) == type])
+            return transitions2return
 
     def getTransitionsAsDataFrame(self):
-        "Returns the list of transitions stored in the object as a data frame with columns `t`, `s`, `a`, `r`, `ns`"
-        return pd.DataFrame(list(self.getTransitions()), columns=['t', 's', 'a', 'r', 'ns'])
+        "Returns the list of transitions stored in the object as a data frame with columns `t`, `s`, `a`, `r`, `ns`, `z`, where `z` is the eligibility trace"
+        return pd.DataFrame(list(self.getTransitions()), columns=['type', 't', 's', 'a', 'r', 'ns', 'z'])
+
+    def getTransitionType(self, idx_transition):
+        "Returns the transition type stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][0]
+
+    def getTransitionTime(self, idx_transition):
+        "Returns the time stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][1]
 
     def getTransitionState(self, idx_transition):
         "Returns the state stored in the given index of the `transitions` attribute"
-        return self.transitions[idx_transition][1]
+        return self.transitions[idx_transition][2]
 
     def getTransitionAction(self, idx_transition):
         "Returns the action stored in the given index of the `transitions` attribute"
-        return self.transitions[idx_transition][2]
+        return self.transitions[idx_transition][3]
 
     def getTransitionReward(self, idx_transition):
         "Returns the reward stored in the given index of the `transitions` attribute"
-        return self.transitions[idx_transition][3]
+        return self.transitions[idx_transition][4]
 
     def getTransitionNextState(self, idx_transition):
         "Returns the next state stored in the given index of the `transitions` attribute"
-        return self.transitions[idx_transition][4]
+        return self.transitions[idx_transition][5]
+
+    def getTransitionEligibilityTrace(self, idx_transition):
+        "Returns the eligibility trace stored in the given index of the `transitions` attribute"
+        return self.transitions[idx_transition][6]
 
     def getTransitionNonZeroRewards(self):
         "Returns the non-zero rewards stored in the transitions history and their indices"

@@ -472,6 +472,7 @@ def compute_transition_matrices(env, policy, atol=1E-6):
         idx_eigenvalue_one = idx_eigenvalue_one[0][0]
         assert np.isclose(eigenvalues[idx_eigenvalue_one], 1.0, atol)
         eigenvector_one = eigenvectors[:, idx_eigenvalue_one]
+        # Normalize the eigenvector so that it represents a probability
         mu = np.squeeze(np.array(np.abs(eigenvector_one) / np.sum(np.abs(eigenvector_one))))
 
     # Independent terms `b` of the `(I - P)*V = b - g*1` Bellman equation, for the EPISODIC (where g = 0) and the CONTINUING learning tasks
@@ -523,7 +524,8 @@ def compute_state_value_function_from_transition_matrix(P, expected_one_step_rew
         # We enclose the generalized inverse operation in a try block because today (14-Jun-2025) the inverse failed with the following error message:
         # "numpy.linalg.linalg.LinAlgError: SVD did not converge"
         V = np.asarray(np.dot(np.linalg.pinv(np.eye(len(P)) - gamma*P), b - g))[0]
-    except:
+    except Exception as e:
+        warnings.warn(f"The true value function could NOT be computed. Error message:\n{repr(e)}")
         V = np.nan
     return V
 

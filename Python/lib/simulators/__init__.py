@@ -34,7 +34,7 @@ BURNIN_TIME_STEPS = 20
 # stationarity (e.g. stationary probabilities, E(T) in Monte-Carlo, E(T_A) in Fleming-Viot)
 MIN_NUM_CYCLES_FOR_EXPECTATIONS = 5
 # Default maximum number of steps T for the initial exploration used to estimate the expected reabsorption time to A, E(T_A), when increasing T as the absorption set A increases
-MAX_NUMBER_OF_STEPS_FOR_EXPECTATION = 2000
+MAX_NUMBER_OF_STEPS_FOR_EXPECTATION = 2000 #5000 #2000  # Default: 2000. Use 5000 for the larger labyrinths with probability of reaching the exit below 1E-6 that I presented in my thesis
 
 DEBUG_TRAJECTORIES = False
 

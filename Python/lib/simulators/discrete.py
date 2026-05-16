@@ -242,13 +242,13 @@ class Simulator:
             epochs = 50 #150
             batch_size = 50
             sampling_rate = 0.5 #1.0 #0.5
+            oversample = False  # Whether to oversample states with smaller number of actions leading to a different state (in order to oversample corner cells in labyrinths and thus try to learn their values better)
             if len(self.agent.getLearner().getTransitionNonZeroRewards()) == 0:
                 print(f"\nINFO: Training of the NN model for V(s) and learning of the advantage function A(s,a) is NOT run because NO informative rewards have been observed!")
             else:
                 print(f"\nTraining the NN model for V(s) and learning the advantage function A(s,a) on {epochs} epochs with batches of size {batch_size}...")
-                loss_values_train = nn_train(self.agent.getLearner(), batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=True,
-                                             alpha_ini=self.agent.getLearner().getInitialLearningRate(), alpha_min=0.0, #self.agent.getLearner().getMinimumLearningRate(),
-                                             seed=kwargs.get('seed'), verbose=True, verbose_period=epochs // 10)
+                loss_values_train, loss_values_true = nn_train( self.agent.getLearner(), batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample,
+                                                                seed=kwargs.get('seed'), verbose=True, verbose_period=epochs // 10)
                 print(f"The training loss went from {loss_values_train[0]:.4f} at epoch 1 to {loss_values_train[-1]:.4f} ({(loss_values_train[-1] / loss_values_train[0] - 1)*100:.1f}% change) "
                       f"at epoch {epochs} on batches of size {batch_size}.")
 
@@ -1720,6 +1720,7 @@ class Simulator:
 
             # Learn (and update the trajectory stored in the learner)
             info['learning_mode'] = learning_mode
+            info['transition_type'] = "MC"
             learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
             if False:
                 # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions
@@ -2391,10 +2392,17 @@ class Simulator:
                 # because in that case the value of terminal states is NOT defined as 0.
                 if learner.getLearningTask() == LearningTask.CONTINUING:
                     info['learning_mode'] = learning_mode
+                    info['transition_type'] = "FV"
                     if is_learner_td_lambda:
                         # Use TD(lambda) on each particle separately, BUT using the COMMONLY estimated average reward (since we need all particles to do so)
                         info['average_reward'] = estimated_average_reward if use_fixed_average_reward else learner.getAverageReward()
                         self.learn_terminal_state_values(learners[idx_particle], t, state, action, next_state, reward, info, done_episode=next_state in self.env.getTerminalStates())
+
+                        # Store the transition on the base learner so that we can use the transitions from ALL particles if using BATCH learning
+                        # Note that we store it REGARDLESS of whether learning_mode == LearningMode.BATCH in case we would like to use the particle transitions for some analysis
+                        # even when we have used the ONLINE learning mode.
+                        learner.store_transition("FV", t, state, action, next_state, reward, learners[idx_particle].getElibilityTraceForAdvantage())
+
                         # Update the state trajectory stored in the base learner, so that we can compute their OVERALL (i.e. over all particles) visit count
                         # which is used when analyzing whether the absorption set A should be increased (based on the FV visits, if requested).
                         learner._states += [state]
@@ -2420,6 +2428,7 @@ class Simulator:
                 # we want a stable estimate of the average reward over all episodes.
                 # TODO: (2024/01/29) Revise the correct use of the `done` variable here, instead of `done_episode`, because actually when we are done by `done`, this line will NEVER be executed because we will NOT enter again the `while done` loop...
                 info['learning_mode'] = learning_mode
+                info['transition_type'] = "FV"
                 if use_fixed_average_reward:
                     # NOTE: Setting this parameter to True ONLY has an effect when the stopping criterion is NOT any of the ones that include the MAX_TIME_STEPS condition
                     # (i.e. the stopping criterion is different from MAX_TIME_STEPS and MAX_TIME_STEPS_AND_MIN_PROP_ABSORBED_PARTICLES)
@@ -2440,6 +2449,12 @@ class Simulator:
                     # Use TD(lambda) on each particle separately, BUT using the COMMONLY estimated average reward (since we need all particles to do so)
                     info['average_reward'] = estimated_average_reward if use_fixed_average_reward else learner.getAverageReward()
                     learners[idx_particle].learn(t, state, action, next_state, reward, done, info)
+
+                    # Store the transition on the base learner so that we can use the transitions from ALL particles if using BATCH learning
+                    # Note that we store it REGARDLESS of whether learning_mode == LearningMode.BATCH in case we would like to use the particle transitions for some analysis
+                    # even when we have used the ONLINE learning mode.
+                    learner.store_transition("FV", t, state, action, next_state, reward, learners[idx_particle].getElibilityTraceForAdvantage())
+
                     # Update the state trajectory stored in the base learner, so that we can compute their OVERALL (i.e. over all particles) visit count
                     # which is used when analyzing whether the absorption set A should be increased (based on the FV visits, if requested).
                     learner._states += [state]
@@ -2918,6 +2933,7 @@ class Simulator:
                     # because in that case the value of terminal states is NOT defined as 0.
                     if learner.getLearningTask() == LearningTask.CONTINUING:
                         info['learning_mode'] = learning_mode
+                        info['transition_type'] = "FV"
                         self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info)
                             ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
                             ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
@@ -3254,6 +3270,7 @@ class Simulator:
                     # because in that case the value of terminal states is NOT defined as 0.
                     if learner.getLearningTask() == LearningTask.CONTINUING:
                         info['learning_mode'] = learning_mode
+                        info['transition_type'] = "FV"
                         self.learn_terminal_state_values(learner, t, state, action, next_state, reward, info)
                             ## Note: the `info` dictionary is guaranteed to be defined thanks to the assertion
                             ## at the initialization of the FV particles that asserts they cannot be at a terminal state.
@@ -3757,6 +3774,7 @@ class Simulator:
                 # (because we are passing env=envs[idx_particle] as parameter to learn_terminal_state_values()).
                 if learner.getLearningTask() == LearningTask.CONTINUING:
                     info['learning_mode'] = learning_mode
+                    info['transition_type'] = "FV"
                     self.learn_terminal_state_values(learner, t_clock, state, action, next_state, reward, info, envs=envs, idx_particle=idx_particle, update_phi=True)
             else:
                 # Step on the selected particle
@@ -3814,6 +3832,7 @@ class Simulator:
                 # not from the exploration of the underlying Markov process carried out here by these "normal" particles.
                 # It is worth noting that state counts are stored in the learner NOT in the environment associated to the particle being updated here)
                 info_normal['learning_mode'] = learning_mode
+                info_normal['transition_type'] = "MC"
                 learner.learn(t, state_normal, action_normal, next_state_normal, reward_normal, done_normal, info_normal, envs=envs_normal, idx_particle=idx_env, update_phi=False)
                 if done_normal and learner.getLearningTask() == LearningTask.CONTINUING:
                     # Go to an environment's start state and learn the value of the terminal state
@@ -4334,6 +4353,7 @@ class Simulator:
                     action = np_random.choice(np.arange(self.env.getNumActions()))
                     reward = self.env.getReward(self.env.getState())
                     info['learning_mode'] = learning_mode
+                    info['transition_type'] = "MC"
                     self.learn_terminal_state_values(learner, t_episode, terminal_state_previous_episode, action, self.env.getState(), reward, info, done_episode=done_episode)
                         ## Notes:
                         ## - it's important that t_episode = -1 here (as is the case because of the reset of t_episode to -1 above) so that there is NO update of the average reward
@@ -4398,6 +4418,7 @@ class Simulator:
                                   state), end="")
 
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
+                info['transition_type'] = "MC"
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
 
                 if self.debug:
@@ -5103,6 +5124,7 @@ class Simulator:
                     # in which case parameter use_fixed_average_reward is set to False.
                     info['average_reward'] = estimated_average_reward
                 info['learning_mode'] = learning_mode
+                info['transition_type'] = "MC"
                 learner.learn(t_episode, state, action, next_state, reward, done_episode, info)
                 if False:
                     # DM-2025/08/16: Given the implementation of random actions at terminal states, we should no longer need to copy the Q and advantage values to the other actions

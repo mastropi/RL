@@ -985,7 +985,7 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
             return gradient
 
 
-def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=False, alpha_ini=1.0, alpha_min=0.0, seed=None, verbose=False, verbose_period=1):
+def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=False, seed=None, verbose=False, verbose_period=1, plot=False):
     """
     Trains a neural network used for state value function approximation V(s) from pre-recorded transitions stored in the given learner
 
@@ -994,10 +994,6 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
     oversample: bool
         Whether to oversample the states according to their possible actions (based on the observed next states being different from the original state)
         default: False
-
-    alpha_ini: positive float
-        Initial learning rate for the advantage learning.
-        default: 1.0
     """
     np.random.seed(seed)
 
@@ -1013,7 +1009,7 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
     nn_model.train()
 
     # Compute the number of batches to consider for each parameter update based on the transitions size and the batch size
-    transitions = learner.getTransitions()
+    transitions = learner.getTransitions() #(type="MC") # Use this "MC" type if we only want to base learning on the samples from the Monte Carlo step of FV
     num_transitions = len(transitions)
 
     # Define the selection probability of each state, based on their number of possible actions (i.e. the number of actions that made the agent change state)
@@ -1093,10 +1089,12 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
             _batch_size = _idx_batch_last - _idx_batch_first
             for sample in sample_indices[_idx_batch_first:_idx_batch_last]:
                 # Parse the sample into its different components
+                type = learner.getTransitionType(sample)
                 state = learner.getTransitionState(sample)
                 action = learner.getTransitionAction(sample)
                 reward = learner.getTransitionReward(sample)
                 next_state = learner.getTransitionNextState(sample)
+                eligibility_trace = learner.getTransitionEligibilityTrace(sample)   # This is assumed to be the state-action eligibility trace (see below, where the advantage weights are updated)
                 visit_counts[state, action] += 1
 
                 # TD error
@@ -1109,13 +1107,11 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
                 # Contribution to the loss
                 loss += learner.getV()._compute_loss(state, delta)
 
-                # Learn the advantage function
-                # IMPORTANT: It's crucial to reduce the learning rate by the visit count if we don't want the advantage function values to explode!
-                # Ex: without reduction, A(s,a) values for the 3x4 gridworld with no obstacles is ~600, whereas with reduction, A(s,a) ~6 (i.e. 100 times smaller!!)
-                A_vector = np.zeros(learner.env.getNumStates() * learner.env.getNumActions(), dtype=float)
-                A_vector[learner.A.getLinearIndex(state, action)] = 1.0
-                alpha = max(alpha_min, alpha_ini / visit_counts[state, action])
-                learner.A.updateWeights(state, action, delta, multiplier_delta=alpha * A_vector)
+                # Learn the advantage function (using GAE, the generalized advantage estimator, which can leverage TD(lambda)-type learning)
+                # NOTE that the GAE does NOT have a learning rate alpha (see details in my SPSS notebook).
+                # Note also that the eligibility trace has information about the *state-action* eligibility for the error computation, NOT just the *state* eligibility,
+                # which makes total sense because we are using it to update the advantage function of the state AND action.
+                learner.A.updateWeights(state, action, delta_fixed_for_advantage, multiplier_delta=eligibility_trace)
             loss = loss / _batch_size
 
             # Perform one optimizer step
@@ -1260,7 +1256,9 @@ if __name__ == "__main__":
         learning_task = LearningTask.CONTINUING
         learning_criterion = LearningCriterion.AVERAGE
         gamma = 1.0
-        lmbda = 0.0
+        # IMPORTANT: The value of lambda does NOT affect the estimate of V(s), just the estimate of H(s,a),
+        # since V(s) is optimized using the Adam optimizer which is based on the ONE-STEP TD error as the loss.
+        lmbda = 0.7 #0.0
         # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
         # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
         # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
@@ -1336,7 +1334,7 @@ if __name__ == "__main__":
         if learning_mode == LearningMode.BATCH: # Use `if False` when BATCH learning is already done by the Simulator.run() method (something that is hard-coded in Simulator.run())
             # Learn NOW!
             learner = sim.getAgent().getLearner()
-            loss_values_train = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, alpha_ini=alpha_ini, alpha_min=alpha_min, seed=seed, verbose=True)
+            loss_values_train, loss_values_true = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, seed=seed, verbose=True, plot=plot_batch)
             plt.figure()
             plt.plot(np.arange(1, len(loss_values_train)+1), loss_values_train, 'r.-')
             plt.gca().set_xlabel("Epoch")

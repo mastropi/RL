@@ -140,7 +140,6 @@ class LeaTDLambda(Learner):
         self.lmbda = lmbda if lmbda is not None else self.lmbda
 
     def learn(self, t, state, action, next_state, reward, done, info):
-        self.store_transition(t, state, action, next_state, reward)
         if info.get('update_trajectory_and_average_reward', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # This is the case when using episodes under a continuing learning task context: in that case, the value functions
@@ -158,6 +157,15 @@ class LeaTDLambda(Learner):
         # See the comment for the environment_set attribute in the GenericLearner class for a couple of use cases.
         super().updateKnownEnvironmentSet({state, next_state})
 
+        # Compute the delta values used for the update of each value function
+        # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
+        # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
+        # function that computes the delta values increases DRY implementation.
+        delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
+
+        # Update the eligibility trace
+        self._updateZ(state, action, self.lmbda, delta_V=delta_V, delta_Q=delta_Q, use_true_GAE=use_true_GAE)
+
         if self.V.isTabular() or info.get('learning_mode', LearningMode.ONLINE) == LearningMode.ONLINE:
             # IMPORTANT: (2025/08/18) We do NOT perform this update step here because the value of `t` is NOT always the total number of simulation steps taken so far, as t may represent the time step within the episode.
             # Update target model if the period has been fulfilled
@@ -166,17 +174,10 @@ class LeaTDLambda(Learner):
             #if not self.V.isTabular() and (t + 1) % self.update_period_model_for_target_V == 0:
             #    self.V_target.setModelParameters(self.V.getModelParameters())
 
-            # Compute the delta values used for the update of each value function
-            # NOTE: We compute the delta separately, and NOT inside the functions that update the value functions,
-            # because the delta information is needed by the adaptive TD(lambda) learner and implementing a specific
-            # function that computes the delta values increases DRY implementation.
-            delta_V, delta_Q = self._compute_deltas(state, action, next_state, reward, info)
-
             #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self.getAlphaForState(state)))
             # Store the learning rates to be used in the value functions update
             self.store_learning_rate(self.getAlphasByState())
-            # Update the eligibility trace
-            self._updateZ(state, action, self.lmbda, delta_V=delta_V, delta_Q=delta_Q)
+
             # Update the action value functions
             # IMPORTANT: (2024/08/12) For the continuous state case that uses neural networks to approximate value functions,
             # we need to update Q first and then V o.w. we get the error that I do NOT understand:
@@ -222,6 +223,11 @@ class LeaTDLambda(Learner):
             #print("Learn: state = {}, next_state = {}, done = {}".format(state, next_state, done))
             if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
                 self._update_alphas(state, action)
+
+        # Store the transition just observed (to be potentially used for OFFLINE or BATCH learning of value functions)
+        # We also store also the eligibility traces (of all state-actions at the moment of the currently visited state-action)
+        # so that we can learn the advantage function OFFLINE using TD(lambda) (as opposed to TD(0)) when lambda > 0.
+        self.store_transition(info.get('transition_type', "MC"), t, state, action, next_state, reward, self._z_A)
 
         if done and info.get('update_trajectory_and_average_reward', True):
             # TEMPORARY-2025/01/14: The condition on 'update_trajectory_and_average_reward' was added today and is linked to the current implementation of the CONTINUING average reward
@@ -559,6 +565,15 @@ class LeaTDLambda(Learner):
 
         return states2plot
 
+    def getElibilityTraceForStateValue(self):
+        return self._z_V
+
+    def getElibilityTraceForActionValue(self):
+        return self._z_Q
+
+    def getElibilityTraceForAdvantage(self):
+        return self._z_A
+
 
 class LeaTDLambdaAdaptive(LeaTDLambda):
     
@@ -673,7 +688,6 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         self.burnin = burnin if burnin is not None else self.burnin
 
     def learn(self, t, state, action, next_state, reward, done, info):
-        self.store_transition(t, state, action, next_state, reward)
         if info.get('update_trajectory_and_average_reward', True):
             # We may not want to update the trajectory when using this call just to learn the value functions.
             # See the comment in the learn() method of the super class (normally LeaTDLambda) for an use case.
@@ -787,6 +801,9 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # Update alpha for the next iteration for "by state counts" update
         if not self.adjust_alpha_by_episode and info.get('update_alphas', True):
             self._update_alphas(state, action)
+
+        # Store the transition just observed (to be potentially used for OFFLINE or BATCH learning of value functions)
+        self.store_transition(info.get('transition_type', "MC"), t, state, action, next_state, reward, self._z_A)
 
         if done and info.get('update_trajectory_and_average_reward', True):
             # TEMPORARY-2025/01/14: The condition on 'update_trajectory_and_average_reward' was added today and is linked to the current implementation of the CONTINUING average reward.

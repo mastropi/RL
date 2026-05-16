@@ -343,6 +343,7 @@ def load_objects_from_pickle(filename, namespace, lib="joblib"):
 
     namespace: dict
         Dictionary representing the namespace where objects read from the filename should be created, where object names are keys and object values are their values.
+        Ex: globals() (to create objects in the global (normally calling) namespace)
 
     lib: (opt) str
         Library to use to load the pickle file, either "joblib" or "pickle". This is done in case one of the libraries is not available where the function is called.
@@ -1228,7 +1229,7 @@ def aggregation_bygroups(df, groupvars, analvars,
         raise ValueError("Parameter 'df' must be a pandas DataFrame ({})".format(type(df)))
 
     # Cast all analysis variables to float in order to compute statistics like mean, std, etc.!!
-    # Otherwise the statistics computed on integer variables are also integer-valued!
+    # Otherwise we may get an error because the values are stored as type `object` or the statistics computed on integer variables are also integer-valued!
     # Ref: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.astype.html
     for var in analvars:
         df = df.astype({var: np.float})
