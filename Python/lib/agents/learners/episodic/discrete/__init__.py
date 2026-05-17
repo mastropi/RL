@@ -191,17 +191,15 @@ class Learner(GenericLearner):
             # as they have their own value too!
             # IMPORTANT: We should NOT use e.g. `dict_function_approximations.get('V', StateValueFunctionApprox(self.env.getNumStates(), {}))`
             # because this STILL CALLS the default argument and if the state space is too large, we get a memory error!!
-            if self.use_separate_model_for_target_V:
-                self.V_target = copy.deepcopy(dict_function_approximations['V']) if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), {})
             self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), {})
             self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
             self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), {})
         else:
-            if self.use_separate_model_for_target_V:
-                self.V_target = copy.deepcopy(dict_function_approximations['V']) if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
             self.V = dict_function_approximations['V'] if 'V' in dict_function_approximations.keys() else StateValueFunctionApprox(self.env.getNumStates(), self.env.getTerminalStates())
             self.Q = dict_function_approximations['Q'] if 'Q' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
             self.A = dict_function_approximations['A'] if 'A' in dict_function_approximations.keys() else ActionValueFunctionApprox(self.env.getNumStates(), self.env.getNumActions(), self.env.getTerminalStates())
+        if self.useSeparateModelForTargetV():
+            self.V_target = copy.deepcopy(self.V)
         # Discount factor
         self.gamma = gamma
 
@@ -425,7 +423,7 @@ class Learner(GenericLearner):
         A warning is issued when one of the reset fails for a value function
         (either because the value function is not defined in the object, or because it is None, etc.).
         """
-        if self.use_separate_model_for_target_V:
+        if self.useSeparateModelForTargetV():
             try:
                 self.getV_target().reset(method=self.reset_method, params_random=self.reset_params, seed=self.reset_seed)
             except Exception as e:
@@ -751,7 +749,7 @@ class Learner(GenericLearner):
 
     def updateTargetModels(self):
         "Updates the target models when non-tabular. Currently only a target model for V(s) is implemented"
-        if self.use_separate_model_for_target_V and not self.V.isTabular():
+        if self.useSeparateModelForTargetV():
             self.V_target.setModelParameters(self.V.getModelParameters())
 
     #-- Getters

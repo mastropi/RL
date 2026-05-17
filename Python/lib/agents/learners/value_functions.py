@@ -1098,11 +1098,25 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
                 visit_counts[state, action] += 1
 
                 # TD error
+                # TODO: (2025/10/26) Adapt this update also for the DISCOUNTED setting
                 if learner.useSeparateModelForTargetV():
                     V_target = reward - learner.getAverageReward() + learner.getV_target().getValue(next_state)
                 else:
                     V_target = reward - learner.getAverageReward() + learner.getV().getValue(next_state)
                 delta = V_target - learner.getV().getValue(state)
+                # During learning of V(s), the advantage function used to update the NN model for V(s) must be computed on a FIXED value of V(s),
+                # until V(s) is updated once the whole trajectory has been considered, i.e. in this case when all batches have been processed (constituting an epoch).
+                # For more details about this requirement, see my notes in the SPSS notebook where I establish the equivalence between the ONLINE and the OFFLINE learning of
+                # the state value function, which use respectively the ONLINE and OFFLINE GAE (generalized advantage estimator), optionally with state-action eligibility traces
+                # (giving rise to the GAE(lambda)).
+                # NOTE that this requirement CANNOT be accomplished when NO target model for V(s) is stored (i.e. when learner.useSeparateModelForTargetV() is False...)
+                # In that case, we break the requirement and simply use the delta error computed above, which is used for the NN weights learning using e.g. the Adam optimizer.
+                if learner.useSeparateModelForTargetV():
+                    # The difference between `delta_fixed_for_advantage` and `delta` is that the `state` value is given by the TARGET model (learner.getV_target())
+                    # as opposed to the `state` value given by the CURRENT model (learner.getV()), which is updated after every sample in the batch is processed.
+                    delta_fixed_for_advantage = reward - learner.getAverageReward() + learner.getV_target().getValue(next_state) - learner.getV_target().getValue(state)
+                else:
+                    delta_fixed_for_advantage = delta
 
                 # Contribution to the loss
                 loss += learner.getV()._compute_loss(state, delta)
