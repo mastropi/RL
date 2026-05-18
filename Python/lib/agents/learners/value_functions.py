@@ -1087,11 +1087,20 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
         p_selection = df_transitions['w_selection'] / np.sum(df_transitions['w_selection'])
     else:
         p_selection = None
-    replace = True  # Taking samples with replacement is usually better than without replacement
+    replace = True  #False
+        ## Although taking samples WITH replacement is usually recommended, in this case, it my be counterproductive for learning the advantage function, particularly when using TD(lambda)
+        ## The main SUSPECTED reason is that the same state-action might be sampled several times with a large eligibility trace value (e.g. 1.0 or larger)
+        ## which could make the advantage function estimation explode...
 
     # Keep track of the loss values recorded at the end of each epoch
-    loss_values_train = np.nan * np.ones(epochs)
-    #loss_values_eval = np.nan * np.ones(epochs)
+    loss_values_train = np.nan*np.ones(epochs)
+    #loss_values_eval = np.nan*np.ones(epochs)
+    loss_values_true = np.nan*np.ones(epochs)
+
+    if plot:
+        ax = plt.figure().subplots(1, 1)
+        ax.set_xlabel("State (linearized)")
+        ax.set_ylabel("V(s)")
 
     # Visit counts for the learning rate adjustment for the advantage function learning
     visit_counts = np.zeros((learner.env.getNumStates(), learner.env.getNumActions()), dtype=int)
@@ -1109,14 +1118,14 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
             sample_indices = np.random.permutation(num_transitions)
 
         # Batch size
-        num_batches = max(1, sample_size / batch_size)
+        num_batches = max(1.0, sample_size / batch_size)
         # Consider the last incomplete batch also in the execution
         if num_batches - int(num_batches) > 0:
             num_batches += 1
         num_batches = int(num_batches)
 
         if show_messages(verbose, verbose_period, epoch):
-            print(f"===== Running epoch {epoch+1} of {epochs} ({num_batches} batches of size {batch_size} on {sampling_rate*100:.1f}% sample (oversample={oversample}) of full data (N={num_transitions}) ======")
+            print(f"===== Running epoch {epoch+1} of {epochs} ({num_batches} batches of size {batch_size} on {sampling_rate*100:.1f}% sample (oversample={oversample}) of full data (n={num_transitions})) ======")
 
         for b in range(num_batches): #tqdm(range(num_batches)):
             if False and verbose:
@@ -1127,6 +1136,7 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
             # even if the loss is NOT updated during the loop, because e.g. no entry to the line `loss += -advantage * logprob` that updates the loss occurs
             # This is NOT documented at all and I arrived to the solution using ChatGPT on 29-Jul-2025 (too bad).
             loss = 0.0 * next(nn_model.parameters()).sum()
+            loss_true = 0.0  # True loss, i.e. the loss based on the true state value function potentially stored in the environment (when known and available)
 
             _idx_batch_first, _idx_batch_last = b*batch_size, min((b+1)*batch_size, len(sample_indices))
             _batch_size = _idx_batch_last - _idx_batch_first
@@ -1161,8 +1171,14 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
                 else:
                     delta_fixed_for_advantage = delta
 
-                # Contribution to the loss
+                # Contribution to the loss: Note that we do NOT use the TRUE V(s) to compute the loss but an estimation of the TRUE V(s) given by the TARGET model
+                # This means that the loss may have very weird behaviour... for instance, go up or have peaks!
                 loss += learner.getV()._compute_loss(state, delta)
+                # We now compute the TRUE loss using the TRUE V(s) stored in the environment
+                # Note that we subtract the average (across states) of the TRUE V(s) and the average of the estimated V(s) because the V(s) is NOT unique when using the average reward criterion.
+                # By doing so, we get a correct value of the actual error being done.
+                if learner.env.getV() is not None:
+                    loss_true += learner.getV()._compute_loss(state, learner.env.getV()[state] - np.nanmean(learner.env.getV()) - (learner.getV().getValue(state) - np.nanmean(learner.getV().getValues()))).item()
 
                 # Learn the advantage function (using GAE, the generalized advantage estimator, which can leverage TD(lambda)-type learning)
                 # NOTE that the GAE does NOT have a learning rate alpha (see details in my SPSS notebook).
@@ -1170,18 +1186,49 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
                 # which makes total sense because we are using it to update the advantage function of the state AND action.
                 learner.A.updateWeights(state, action, delta_fixed_for_advantage, multiplier_delta=eligibility_trace)
             loss = loss / _batch_size
+            loss_true = loss_true / batch_size
 
             # Perform one optimizer step
             learner.getV().optimizer.zero_grad()
             loss.backward()
             learner.getV().optimizer.step()
 
+        if plot:
+            ax.axhline(0, color="gray")
+            lines = []
+            labels = []
+            if learner.env.getV() is not None:
+                line1 = ax.plot(learner.env.getV(), 'b.-')
+                lines += line1
+                labels += ["True V(s)"]
+            if learner.useSeparateModelForTargetV():
+                line2 = ax.plot(learner.getV_target().getValues(), 'm-')
+                lines += line2
+                labels += ["Target V(s) model"]
+            line3 = ax.plot(learner.getV().getValues(), 'r-')
+            lines += line3
+            labels += ["Estimated V(s)"]
+            ax.legend(lines, labels)
+            ax.set_title(f"Epoch {epoch + 1} of {epochs}: Estimated Loss = {loss.item():.3g}" + f", TRUE Loss = {loss_true:.3g}" if learner.env.getV() is not None else "")
+            plt.pause(0.1)
+            plt.draw()
+
         # Update TARGET V(s) model at the end of the epoch
-        if learner.useSeparateModelForTargetV():
+        # Activate this (by removing the `False and`) if the below update OUTSIDE the loop is NOT activated for a FASTER update of the target model than using the below update
+        if learner.useSeparateModelForTargetV():    # False and learner.useSeparateModelForTargetV():
             learner.updateTargetModels()
 
         # Store the loss at the end of each training epoch
         loss_values_train[epoch] = loss.item()
+        if learner.env.getV() is not None:
+            # We only store the computed TRUE loss if there is a way to compute the TRUE loss, i.e. if the TRUE V(s) is known
+            loss_values_true[epoch] = loss_true
+
+    # Update TARGET V(s) model at the end of ALL epochs
+    # Activate this (by removing the `False and`) if the above update within the loop is NOT activated for a SLOWER update of the target model than using the above update
+    if False and learner.useSeparateModelForTargetV():
+        learner.updateTargetModels()
+
     if verbose:
         print("DONE!")
 
@@ -1197,7 +1244,7 @@ def nn_train(learner, batch_size=50, epochs=50, sampling_rate=None, oversample=F
     #         plt.pause(0.0000001)
     #     plt.draw()
 
-    return loss_values_train
+    return loss_values_train, loss_values_true
 
 
 if __name__ == "__main__":
@@ -1205,6 +1252,8 @@ if __name__ == "__main__":
     import pandas as pd
     import torch
     import matplotlib.pyplot as plt
+    from timeit import default_timer as timer
+    from time import process_time
 
     import Python.lib.agents as agents
     from Python.lib.agents.learners import LearningCriterion, LearningTask, LearningMode
@@ -1227,11 +1276,15 @@ if __name__ == "__main__":
     #env_type = Environment.MountainCar
     env_type = Environment.Gridworld
 
+    time_start = timer()
+    time_start_cpu = process_time()
+
     #-- Environment characteristics
     if env_type == Environment.Gridworld:
         # Gridworld with random obstacles
-        prop_obstacles = 0.0; seed_obstacles = 4217
-        size_vertical = 3; size_horizontal = 4
+        prop_obstacles = 0.1; seed_obstacles = 4217
+        size_vertical = 6; size_horizontal = 8
+        size_vertical = 10; size_horizontal = 14
         env_shape = (size_vertical, size_horizontal)
         n_obstacles = int(prop_obstacles * np.prod(env_shape))
 
@@ -1270,15 +1323,21 @@ if __name__ == "__main__":
         # Whether to use the average reward computed from the A-estimation step as a FIXED average reward (correction) value (as opposed to iteratively updated)
         # in the FV learning of differential value functions. Note that the TD learning of the differential value functions ALWAYS uses an iterative update
         # of the average reward because there is no warm estimate of the expected reward that could be used in its place...
+        # In FV, in principle it is much better to set use_fixed_average_reward_fv = True, which is Keith Ross's approach to the computation of the average reward.
+        # For an example of what happens when using either case see entry on Sun, 17-May-2026 in FVRL-Meetings.docx.
         use_fixed_average_reward_fv = True
-        #learning_mode = LearningMode.ONLINE
-        learning_mode = LearningMode.BATCH; batch_size = 50; epochs = 50; sampling_rate = 1.0; oversample = False
+
+        learning_mode = LearningMode.ONLINE
+        #learning_mode = LearningMode.BATCH
+        batch_size = 50; epochs = 50; sampling_rate = 1.0; oversample = False
+        batch_size = 50; epochs = 25; sampling_rate = 1.0; oversample = False   # use 25 epochs for faster learning than with 50
+
         learner_type = "fv" #"td"
         lr = 1E-2 #1E-1 #1E-2 #1E-3
         nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
         nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
         nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env2d.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
-        # See https://stats.stackexchange.com/questions/181/how-to-choose-the-number-of-hidden-layers-and-nodes-in-a-feedforward-neural-netw
+        # See Ref: https://stats.stackexchange.com/questions/181/how-to-choose-the-number-of-hidden-layers-and-nodes-in-a-feedforward-neural-netw
         # for recommendations written in 2010 about number of hidden layers and their sizes.
         # Summary:
         # - # hidden layers: 1 (adding new layers rarely improves performance)
@@ -1287,8 +1346,8 @@ if __name__ == "__main__":
         # (2025/08/04) In my case:
         # a) when using more neurons in hidden layer (e.g. 48 instead of 12), the estimation of V(s) becomes more curved... but actually NOT better...
         # b) when using more hidden layers, it seems there is a vanishing gradient problem because the value function V(s) is hardly updated, even with larger alpha = 10!
-        nn_hidden_layer_sizes_V = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_V, 1])))]
-        nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
+        nn_hidden_layer_sizes_V = [12] #[144] #[48, 12] #[128] #[12] #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_V, 1])))]
+        #nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
         dict_function_approximations = None
         if use_neural_network:
             dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V, lr=lr),
@@ -1296,11 +1355,12 @@ if __name__ == "__main__":
                                                  #'A': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
                                                  })
 
-        # Policy characteristics (the policy model is currently not used because no policy learning takes place, only value functions learning)
-        nn_hidden_layer_sizes_P = [12]
-        nn_model = NNBackprop(1, nn_hidden_layer_sizes_P, env2d.getNumActions(), dict_activation_functions=dict({'hidden': [torch.nn.ReLU]*len(nn_hidden_layer_sizes_P)}))
-        policy_nn = PolNN(env2d, nn_model, seed=seed)
-        print(f"Neural network to model the policy:\n{nn_model}")
+        # Policy characteristics (the policy model is currently ONLY used to define the dynamics but it is NOT learned, only value functions are learned)
+        nn_hidden_layer_sizes_P = []
+        nn_model_policy = NNBackprop(env2d.getNumStates(), nn_hidden_layer_sizes_P, env2d.getNumActions(), dict_activation_functions=dict({'hidden': [torch.nn.ReLU]*len(nn_hidden_layer_sizes_P)}))
+        policy_nn = PolNN(env2d, nn_model_policy, seed=seed)
+        print(f"Neural network to model the policy:\n{nn_model_policy}")
+        print(f"Policy values for each state:\n{policy_nn.get_policy_values()}")
 
         # Initialize the policy to the given initial policy
         policy_nn.reset()
@@ -1341,7 +1401,7 @@ if __name__ == "__main__":
 
         # Learner FV
         N = 50
-        T = 500
+        T = 1000 #500   # Note: T = 500 might be too small to generate sensible estimate of V(s) with ONLINE learning
         learner_fv = fv.LeaFV(  env2d,
                                 N, T, set(), None,
                                 states_of_interest=None,
@@ -1374,12 +1434,13 @@ if __name__ == "__main__":
         if learner_type == "fv":
             V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
                 sim_fv.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
-                           max_time_steps=1500, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,
+                           max_time_steps=None, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,   # Note: It's useless to set `update_absorption_set_with_fv_visits=True` because this only affects the case in which the policy is also learned, as the absorption set can be updated for the NEXT policy learning step.
                            use_average_reward_stored_in_learner=True, use_fixed_average_reward=use_fixed_average_reward_fv,
+                           keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=False,
                            seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
             sim = sim_fv
         else:
-            T = 1000 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy
+            T = 3500 #1500 #5000 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy, and 3500 is ~ #steps used by FV
             #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
             V, Q, A, state_counts, _, _, learning_info = \
                 sim_td.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
@@ -1394,9 +1455,11 @@ if __name__ == "__main__":
             loss_values_train, loss_values_true = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, seed=seed, verbose=True, plot=plot_batch)
             plt.figure()
             plt.plot(np.arange(1, len(loss_values_train)+1), loss_values_train, 'r.-')
+            plt.plot(np.arange(1, len(loss_values_true)+1), loss_values_true, 'g.-')
             plt.gca().set_xlabel("Epoch")
             plt.gca().set_ylabel("Loss")
             plt.title(f"Training loss for {learner_type.upper()}")
+            plt.legend(["Estimated Loss", "True Loss"])
             plt.show()
 
         # Plot
@@ -1519,3 +1582,10 @@ if __name__ == "__main__":
                                       seed=131713,
                                       verbose=True,
                                       verbose_period=1)
+
+    time_end = timer()
+    time_end_cpu = process_time()
+    time_elapsed = time_end - time_start
+    time_elapsed_cpu = time_end_cpu - time_start_cpu
+    print("Execution time: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed, time_elapsed / 60, time_elapsed / 3600))
+    print("Execution time CPU: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed_cpu, time_elapsed_cpu / 60, time_elapsed_cpu / 3600))
