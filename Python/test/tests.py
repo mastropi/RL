@@ -1667,13 +1667,13 @@ for learning_method in learning_methods:
     ############# Store the measures that we would like to compare
 
 
-    #------------------ Plots -----------------
-    if learning_method != "all_online": # Otherwise, `trajectory_under_policy` (used in the call below) is not defined
+    # ------------------ Plots -----------------
+    if learning_method != "all_online":  # Otherwise, `trajectory_under_policy` (used in the call below) is not defined
         plot_state_counts(dict_simulator, learning_method, rep, params_exec, trajectory=trajectory_under_policy, plot_absorption_set=True)
 
     if adjust_optimizer_learning_rate:
         plt.figure()
-        plt.plot(np.arange(1, n_learning_steps+1), dict_LR[learning_method][rep], color="orange", marker=".")
+        plt.plot(np.arange(1, n_learning_steps + 1), dict_LR[learning_method][rep], color="orange", marker=".")
         plt.title("Optimizer learning rate by learning step")
         plt.gca().set_ylim((0.0, None))
 
@@ -1691,8 +1691,8 @@ if learning_method_type == "values_fv":
     plt.legend(["Avg. Reward estimated by FV", "Avg. Reward from Initial Exploration", "Inflated Avg. Reward from FV simulation"])
 
 if not plot_policy_update:
-    _average_reward_at_last_policy_learning_step = dict_R[learning_method][nrep-1][-1]
-    _state_counts_during_policy_learning = dict_state_counts[learning_method][nrep-1, :, :]
+    _average_reward_at_last_policy_learning_step = dict_R[learning_method][rep][-1]
+    _state_counts_during_policy_learning = dict_state_counts[learning_method][rep, :, :]
     axes = plot_policy(dict_simulator[learning_method][rep].getEnv(), dict_simulator[learning_method][rep].getAgent().getPolicy(),
                        _average_reward_at_last_policy_learning_step,
                        _state_counts_during_policy_learning,
@@ -2147,7 +2147,7 @@ dict_colors, dict_linestyles, dict_legends, figsize = define_plotting_parameters
 # Show the execution times by method
 for meth in dict_time_elapsed.keys():
     print(f"Execution times for meth={meth}: total = {np.sum(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.sum(dict_time_cpu[meth])/60:.1f} min), "
-          f"average = {np.mean(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.mean(dict_time_cpu[meth])/60:.1f} min)")
+          f"average = {np.mean(dict_time_elapsed[meth])/60:.1f} min (CPU: {np.nanmean(dict_time_cpu[meth])/60:.1f} min)")
 
 # Show the number of steps by method
 for meth in dict_nsteps.keys():
@@ -2222,27 +2222,38 @@ if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
     ax_R_nsamples.set_ylim((ax_R.get_ylim()[0], None))
     ax_R_nsamples.legend(["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"], loc="lower right")
 
+# --> FOR THESIS
 # Plot all replications individually
+plot_for_paper = True
+fontsize = 26 if plot_for_paper else 12
 ax = plt.figure(figsize=figsize).subplots(1, 1)
+ax.axhline(0.0, color="gray", linestyle="dashed")
 lines = []
 legend = []
 for rep in range(nrep):
-    for meth in dict_R_toplot.keys():
+    for meth in sorted(dict_R_toplot.keys()):
+        if meth in ["values_tdl2"]: #["values_fv", "values_fv2", "values_td"]:
+            continue
         line = ax.plot(np.arange(1, n_learning_steps+1), dict_R_toplot[meth][rep, :n_learning_steps], '-', color=dict_colors[meth], linewidth=0.3)
-        ax.text(n_learning_steps, dict_R_toplot[meth][rep, -1], f"rep={rep+1} (seed={seed_base*(rep+1)})", color=dict_colors[meth])
+        if not plot_for_paper:
+            ax.text(n_learning_steps, dict_R_toplot[meth][rep, -1], f"rep={rep+1} (seed={seed_base*(rep+1)})", color=dict_colors[meth])
         lines += line if rep == 0 else []
-        legend += [meth] if rep == 0 else []
+        legend += [f"{dict_legends[meth]}"] if rep == 0 else []
         #ax.axhline(0, color="gray")
-        ax.set_xlabel("Learning step")
-        ax.set_ylabel("Average reward")
+        ax.set_xlabel("Learning step", fontsize=fontsize)
+        ax.set_ylabel("Episodic average reward", fontsize=fontsize)
 line = ax.axhline(max_avg_reward_episodic, color="darkgreen") if policy_learning_mode == "online" else None
 line = ax.axhline(max_avg_reward_continuing, color="lightgreen") if policy_learning_mode == "offline" else None
 lines += [line]
 legend += ["Max. average reward" + (policy_learning_mode == "online" and " (episodic)" or " (continuing)")]
-ax.legend(lines, legend, loc="center right")
-plt.suptitle(f"ALL LEARNING METHODS: {env_type_name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
-             f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, ALL {nrep} replications" +
-             _learning_characteristics)
+ax.legend(lines, legend, loc="center right", fontsize=int(0.5 * fontsize))
+if plot_for_paper:
+    ax.tick_params(axis='both', labelsize=int(0.8 * fontsize))
+else:
+    plt.suptitle(f"ALL LEARNING METHODS: {env_type_name} {env_shape} - {learning_task.name} learning task - {learning_criterion.name} reward criterion (gamma={gamma})"
+                 f"\nWIND: {wind_dict}, EXIT: {_exit_state_str}, ALL {nrep} replications" +
+                 _learning_characteristics)
+plt.savefig("spaghetti.png", dpi=300)
 
 # --> FOR PAPER
 # Plot results on several replications
@@ -2250,18 +2261,21 @@ plot_for_paper = True
 marker_for_mean = "" if plot_for_paper else "."
 marker_for_median = "." if plot_for_paper else "x"
 fontsize = 26 if plot_for_paper else 12
+loc_legend = "upper left"
+#loc_legend = "center right"
 if nrep > 1:
     plot_mean = plot_for_paper #False #True
     plot_median = True
     plot_bands = not plot_for_paper #True #False
     dict_stats_R = dict.fromkeys(dict_loss.keys())
     ax = plt.figure(figsize=figsize).subplots(1, 1)
+    ax.axhline(0, color="gray", linestyle="dashed")
     lines = []
     legend = []
     _xshift = -0.1 # shift on the X axis to avoid overlap of vertical error bars
     for meth in dict_loss.keys():
         # Adapt the following filter if we want to exclude a particular method from the comparison plot
-        if meth in []: #["values_fv", "values_fv2", "values_td"]:
+        if meth in ["values_tdl2"]: #["values_fv", "values_fv2", "values_td"]:
             continue
         _xshift += 0.1
         # Compute distribution of values to plot
@@ -2271,7 +2285,8 @@ if nrep > 1:
         dict_stats_R[meth]['median'], \
         dict_stats_R[meth]['mean'], \
         dict_stats_R[meth]['std'], \
-        dict_stats_R[meth]['n'] = dict_R_toplot[meth].min(axis=0), dict_R_toplot[meth].max(axis=0), np.median(dict_R_toplot[meth], axis=0), dict_R_toplot[meth].mean(axis=0), dict_R_toplot[meth].std(axis=0), len(dict_R_toplot[meth])
+        dict_stats_R[meth]['n'] = np.nanmin(dict_R_toplot[meth], axis=0), np.nanmax(dict_R_toplot[meth], axis=0), np.nanmedian(dict_R_toplot[meth], axis=0), np.nanmean(dict_R_toplot[meth], axis=0), np.nanstd(dict_R_toplot[meth], axis=0), \
+                                  np.max(np.sum(~np.isnan(dict_R_toplot[meth]), axis=0)) #len(dict_R_toplot[meth])
         # Percentiles (if needed)
         # percentiles_low = [10, 25]
         # percentiles_upp = [90, 75]
@@ -2295,12 +2310,12 @@ if nrep > 1:
                             color=dict_colors[meth],
                             alpha=0.5)
             lines += [line]
-            legend += [f"{dict_legends[meth]} (average +/- SE, {np.mean(dict_nsteps[meth]):.0f} avg.#steps)"]
+            legend += [f"{dict_legends[meth]} (average +/- SE, {np.nanmean(dict_nsteps[meth]):.0f} avg.#steps)"]
         if plot_median:
             # MEDIAN plot
             line = ax.plot(_xvalues, dict_stats_R[meth]['median'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed" if plot_mean else "solid", linewidth=2, marker=marker_for_median, markersize=12)[0]
             lines += [line]
-            legend += [f"{dict_legends[meth]} (median), {np.mean(dict_nsteps[meth]):.0f} avg.#steps)"]
+            legend += [f"{dict_legends[meth]} (median), {np.nanmean(dict_nsteps[meth]):.0f} avg.#steps)"]
         if plot_bands:
             # MIN/MAX plot
             line = ax.plot(_xvalues, dict_stats_R[meth]['max'][:n_learning_steps] / max_avg_reward, color=dict_colors[meth], linestyle="dashed")[0]
@@ -2312,7 +2327,7 @@ if nrep > 1:
                             dict_stats_R[meth]['min'][:n_learning_steps] / max_avg_reward,
                             color=dict_colors[meth],
                             alpha=0.1)
-    ax.legend(lines, legend, loc="upper left", fontsize=int(0.5 * fontsize))
+    ax.legend(lines, legend, fontsize=int(0.5 * fontsize), loc=loc_legend)
     if max_avg_reward != 1.0:
         # This is the case when the max average reward is known, so we show the horizontal line corresponding to the maximum achievable NORMALIZED average reward which is equal to 1
         ax.axhline(1, color="gray")
@@ -2332,24 +2347,24 @@ if nrep > 1:
     # Plot of number of samples ratios between FV learnings and TD learning
     legend_nsamples = []
     if "values_td" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'td': np.nanmean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         ax_nsamples = ax.twinx()
         ax_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'], color="blue", linewidth=0.5)
         ref_line = ax_nsamples.axhline(1.0, color="blue", linewidth=0.5, linestyle="dashed")
         legend_nsamples += ["Sample size ratio (FV/TD)", "Reference line showing equal sample size ratio"]
     if "values_tdl" in dict_nsteps.keys() and "values_fvl" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_tdl'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fvl'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'td': np.nanmean(dict_nsteps['values_tdl'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fvl'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         ax_nsamples = ax.twinx()
         ax_nsamples.plot(range(1, n_learning_steps+1), df_ratio_nsamples['ratio_fv_td'], color="blue", linewidth=0.5)
         ref_line = ax_nsamples.axhline(1.0, color="blue", linewidth=0.5, linestyle="dashed")
         legend_nsamples += ["Sample size ratio (FVL/TDL)", "Reference line showing equal sample size ratio"]
     if "values_td" in dict_nsteps.keys() and "values_fv2" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'td': np.nanmean(dict_nsteps['values_td'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         if "ax_nsamples" not in locals():
             ax_nsamples = ax.twinx()
@@ -2357,8 +2372,8 @@ if nrep > 1:
         ref_line = ax_nsamples.axhline(1.0, color="orange", linewidth=0.5, linestyle="dashed")
         legend_nsamples += ["Sample size ratio (FV2/TD)", "Reference line showing equal sample size ratio"]
     if "values_td2" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'td': np.nanmean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         if "ax_nsamples" not in locals():
             ax_nsamples = ax.twinx()
@@ -2368,8 +2383,8 @@ if nrep > 1:
             ref_line = ax_nsamples.axhline(1.0, color="cyan", linewidth=0.5, linestyle="dashed")
             legend_nsamples += ["Reference line showing equal sample size ratio"]
     if "values_td2" in dict_nsteps.keys() and "values_fv2" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'td': np.nanmean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         if "ax_nsamples" not in locals():
             ax_nsamples = ax.twinx()
@@ -2380,8 +2395,8 @@ if nrep > 1:
             legend_nsamples += ["Reference line showing equal sample size ratio"]
         ax_nsamples.set_ylim((ax.get_ylim()[0], None))
     if "values_td2" in dict_nsteps.keys() and "values_fv3" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'td': np.mean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fv3'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'td': np.nanmean(dict_nsteps['values_td2'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fv3'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv_td'] = df_ratio_nsamples['fv'] / df_ratio_nsamples['td']
         if "ax_nsamples" not in locals():
             ax_nsamples = ax.twinx()
@@ -2392,8 +2407,8 @@ if nrep > 1:
             legend_nsamples += ["Reference line showing equal sample size ratio"]
         ax_nsamples.set_ylim((ax.get_ylim()[0], None))
     if "values_fv2" in dict_nsteps.keys() and "values_fv" in dict_nsteps.keys():
-        df_ratio_nsamples = pd.DataFrame({'fv2': np.mean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps],
-                                          'fv': np.mean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
+        df_ratio_nsamples = pd.DataFrame({'fv2': np.nanmean(dict_nsteps['values_fv2'], axis=0)[:n_learning_steps],
+                                          'fv': np.nanmean(dict_nsteps['values_fv'], axis=0)[:n_learning_steps]})
         df_ratio_nsamples['ratio_fv2_fv'] = df_ratio_nsamples['fv2'] / df_ratio_nsamples['fv']
         if "ax_nsamples" not in locals():
             ax_nsamples = ax.twinx()
@@ -2412,6 +2427,7 @@ if nrep > 1:
             ax_nsamples.set_ylabel("Average sample Ratio FV/TD across replications", fontsize=int(0.8 * fontsize))
             ax_nsamples.legend(legend_nsamples, loc="center left") #"lower right")
 #-- ALTOGETHER PLOT
+plt.savefig("altogether.png", dpi=300)
 #------------------ Plots -----------------
 
 
