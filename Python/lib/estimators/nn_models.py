@@ -165,7 +165,9 @@ class NNBackprop(nn.Module):
         and the activation functions of the hidden layers and of the output layer.
 
         Return: tuple
-        Duple with the list of activation functions across hidden layers and the activation function for the output layer.
+        Duple with the list of activation functions across hidden layers
+        (the same activation is used for ALL neurons in a given layer, so just one activation function is stored for each layer)
+        and the activation function for the output layer.
         """
         # Hidden layers
         if not isinstance(hidden_sizes, list):
@@ -229,3 +231,11 @@ class NNBackprop(nn.Module):
 
     def getOutputLayer(self):
         return self.output_layer
+
+    def getHiddenLayerActivations(self, h):
+        "Returns THE function activation used in the given hidden layer (common to ALL neurons in the layer)"
+        return self.list_activation_functions_hidden[h]
+
+    def getOutputLayerActivation(self):
+        "Returns THE function activation used in the output layer (common to ALL neurons in the layer)"
+        return self.activation_function_output

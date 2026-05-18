@@ -459,11 +459,11 @@ class ValueFunctionApproxNN:
 
     def reset(self, method=ResetMethod.ALLZEROS, params_random=None, seed=None):
         "Resets the value function to random values for every state around the value zero, optionally using a seed for the random initialization of the neural network weights"
-        self.init_value(value=0.0, seed=seed)
+        self.init_value(seed=seed)  # It may be recommended to initialize biases
         # Reset the Adam optimizer (to avoid leakage from one replication to the next!)
         self.optimizer = self.optimizer_algorithm(self.nn_model.parameters(), lr=self.lr)
 
-    def init_value(self, value=None, eps=1E-1, seed=None):
+    def init_value(self, value=0.0, eps=0.0, seed=None):
         """
         Initializes the parameters of the neural network so that the output value is either almost the same for all input states
         or is almost equal to `value`, also for all input states.
@@ -479,12 +479,13 @@ class ValueFunctionApproxNN:
 
         Arguments:
         value: (opt) float
-            Value defining the output of the neural network for each state being modeled.
-            default: None, in which case the output value is initialized using a standard normal distribution
+            Value defining the bias of each neuron.
+            default: 0.0
 
         eps: (opt) positive float
-            Small value defining the standard deviation of the normal distribution used to define the weights and biases of all layers except for
-            the biases of the neurons in the output layer.
+            Small value defining the standard deviation of the normal distribution used to define the weights in all layers that do NOT reach
+            a neuron activated by a ReLU activation function (in which case the Kaiming He initialization is used
+            --ref: https://www.geeksforgeeks.org/deep-learning/kaiming-initialization-in-deep-learning).
             default: 1E-2
 
         seed: (opt) int
@@ -499,15 +500,29 @@ class ValueFunctionApproxNN:
             torch.nn.init.torch.manual_seed(seed)  # manual_seed() does not accept `None`
 
         # The initial parameters are set from a standard normal distribution around 0 with small variance so that all weights are about 0
-        for p in self.nn_model.parameters():
-            torch.nn.init.normal_(p, 0, eps)
-        # Store in a variable the last parameter which is the bias of the output neuron, whose value will be set below
-        bias_output_layer = p
-
-        # If a specific output value is requested, it is set via the bias of the output neuron (which is the last parameter in nn_model.parameters() retrieved above)
-        if value is not None and is_scalar(value):
-            # Initialize the bias of the output neuron to `value`
-            torch.nn.init.constant_(bias_output_layer, value)
+        for p in self.nn_model.named_parameters():
+            # Using nn_model.named_parameters(): p[0] contains the parameter name and p[1] contains the parameter value
+            _parameter_name = p[0]  # Ex: "hidden_layers.0.weight", "hidden_layers.0.bias", "output_layer.weight", etc.
+            if "bias" in _parameter_name:
+                #torch.nn.init.constant_(p[1], value)
+                torch.nn.init.normal_(p[1], value, eps)
+            else:
+                # Get the layer number from the parameter's name
+                _layer_number = _parameter_name[_parameter_name.index('.') + 1:_parameter_name.rindex('.')]
+                if _layer_number != "" and \
+                    self.nn_model.getHiddenLayerActivations(int(_layer_number)) == torch.nn.modules.activation.ReLU:
+                        # Kaiming initialization tries to avoid gradient variance exploding
+                        # Ref: https://www.geeksforgeeks.org/deep-learning/kaiming-initialization-in-deep-learning/
+                        # Note: mode can be either "fan_in" and "fan_out" and represents the number of input and output weights from the neuron, n,
+                        # which is used in the standard deviation of the normal used by Kaiming He: N(0, sqrt(2/n))
+                        # According to the documentation, "fan_in' preserves the weights variance in the forward pass
+                        # and "fan_out" preserves the weights variance in the backward pass.
+                        # This initialization is only recommended for the ReLU activation function,
+                        # o.w. for sigmoid or tanh, see xavier_normal_() activation, which initializes the weights with N(0, sqrt(2 / (fan_in + fan_out))).
+                        torch.nn.init.kaiming_normal_(p[1], mode="fan_in", nonlinearity="relu")
+                else:
+                    # If the output layer is NOT ReLU but uses e.g. a linear activation, this guarantees that the output of the NN model is initialized to zero when eps = 0
+                    torch.nn.init.normal_(p[1], 0, eps)
 
     #-- GETTERS
     def getEnvironmentStateFromSimulationState(self, state_simulation):
@@ -545,6 +560,14 @@ class ValueFunctionApproxNN:
 
     def getValues(self):
         return NotImplementedError
+
+    def getNumParameters(self):
+        "Returns the number of parameters in the NN model"
+        num_parameters = 0
+        for params in self.nn_model.parameters():
+            num_parameters += len(params)
+
+        return num_parameters
 
     # (2025/07/21) Taken from the ctu/aic repository (get_model_parameters())
     def getModelParameters(self):
@@ -590,6 +613,26 @@ class ValueFunctionApproxNN:
         gradient_numpy = np.array([float(x) for x in gradient], dtype=float)
 
         return gradient_numpy
+
+    def getAdamLearningRates(self):
+        "Returns a 1D tensor with the CURRENT learning rate of the Adam optimizer for each parameter in the model"
+        # (2025/08/26) NOT TESTED YET
+        # Adapted from: https://www.reddit.com/r/pytorch/comments/1byxmoy/how_to_get_the_average_learning_rate_for_adam
+        # to cover the current learning rate of ALL parameters in the model.
+        # In fact, Adam produces different learning rates for the different parameters in the model.
+        epsilon = 1e-8  # Used in the denominator of the learning rate adjustment by Adam
+        idx_parameter = -1
+        learning_rates_by_parameter = torch.nan * torch.ones(self.getNumParameters(), dtype=float)
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                idx_parameter += 1
+                beta1, _ = group['betas']   # Beta parameters of the Adam optimizer
+                state = self.optimizer.state[p]
+
+                bias_correction1 = 1 - beta1**state['step']
+                learning_rates_by_parameter[idx_parameter] = group['lr'] / bias_correction1 / torch.sqrt(state['exp_avg_sq'] + epsilon)
+
+        return learning_rates_by_parameter
 
     #-- SETTERS
     # (2025/07/21) Taken from the ctu/aic repository (set_model_parameters())
@@ -772,7 +815,7 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
         if is_learner_td_lambda:
             # Learning happens by updating the theta parameter in our learner (e.g. LeaTDLambda)
 
-            # The following step on the optimizer, even if we don't use it update the model parameters with self.optimizer.step(), is crucial in order to avoid estimation divergence!
+            # The following step on the optimizer, even if we don't use it to update the model parameters with self.optimizer.step(), is crucial to avoid estimation divergence!
             # In fact, if we don't do it, the gradient w.r.t. the output bias increases linearly to 1, 2, 3, ... because the gradient of the a single output neuron is always 1
             # (see answer by the guru of PyTorch, ptrblck at https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634)
             # and this value 1 is summed up to the already stored gradient (1) if no zero_grad() call is done before computing the gradient!
