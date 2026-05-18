@@ -1848,6 +1848,22 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
              f"\nN={N}, T={T}, wind_dict={wind_dict}, MAX budget={max_time_steps_benchmark} steps per policy learning step"
              f"\nEvolution of the value functions V(s) and Q(s,a) with the learning step by state\nMaximum average reward (continuing): {max_avg_reward_continuing}")
 
+# Plot of V(s): TRUE, estimated and TARGET (if available)
+learner = dict_simulator[learning_method][rep].getAgent().getLearner()
+plt.figure()
+plt.axhline(0, color="gray")
+plt.plot(learner.env.getV(), 'b.-')
+plt.plot(learner.getV().getValues(), 'r.-')
+plt.plot(learner.getV_target().getValues(), 'm.-')
+plt.legend(["zero", "True V(s)", "Estimated V(s)", "Target V(s) model"])
+# Plot Delta(V) and avg(R) in order to analyze the contributions to the TD error = 0 - avg(R) + Delta(V), where 0 is the reward received for all states except the terminl state
+# and Delta(V) is actually the difference between V(S(t+1)) - V(S(t)), and we here plot the case when the action is going RIGHT, because of the way the 2D state is converted to 1D.
+ax2 = plt.gca().twinx()
+ax2.plot(np.diff(learner.getV().getValues()), 'k.-')
+ax2.axhline(0, color="black", linestyle="dashed")
+ax2.axhline(learner.getAverageReward(), color="green")
+ax2.set_ylabel(r"$\Delta V(s)$ and avg(R)")
+
 
 # Plot the ADVANTAGE function
 marker = ''
@@ -1905,11 +1921,34 @@ plt.suptitle(f"{learning_method.upper()}\n{learning_task.name} learning task - {
 
 
 
-
-
-
-
-
+# 2025/08/22
+# Plot V(s) for selected states, so that we can compare their evolution
+states = [(3,8), (4,8), (4,9), (5,8)]      # For the 10x14 (40% obstacles, seed=4217)
+states = [(5,0), (6,0), (7,0), (8,0)]               # For the 10x14 (30% obstacles, seed=4217)
+states4diff = [(7,0), (6,0)]    # Two states that are used to evaluate the difference delta(V) = V(S[1]) - V(S[0]) which appears in the calculation of the TD error
+colormap = cm.get_cmap("rainbow", lut=len(states))
+ax_V, ax_C = plt.figure().subplots(1, 2)
+legend = []
+for i, state in enumerate(states):
+    s = test_ac.getEnv().getIndexFromState(state, simulation=False)
+    ax_V.plot(np.arange(1, n_learning_steps+1), dict_V[learning_method][rep, :n_learning_steps, s], color=colormap(i), marker='.')
+    ax_C.plot(np.arange(1, n_learning_steps + 1), dict_state_counts[learning_method][rep, :n_learning_steps, s], color=colormap(i), marker='.')
+    legend += [f"state {state}"]
+ax_V.legend(legend)
+ax_C.legend(legend)
+ax_R = ax_V.twinx()
+ax_R.plot(np.arange(1, n_learning_steps+1), dict_R_long[learning_method][rep, :n_learning_steps], color="green", marker='.')
+legend_R = ["Average Reward"]
+if len(states4diff) == 2:
+    s = test_ac.getEnv().getIndexFromState(states4diff[0], simulation=False)
+    ns = test_ac.getEnv().getIndexFromState(states4diff[1], simulation=False)
+    ax_R.plot(np.arange(1, n_learning_steps+1), dict_V[learning_method][rep, :n_learning_steps, ns] -  dict_V[learning_method][rep, :n_learning_steps, s], color="black", marker='.')
+    ax_R.axhline(0, color="gray")
+    legend_R += [f"Delta(V): V({states4diff[1]}) - V({states4diff[0]})"]
+ax_R.legend(legend_R)
+ax_V.set_title("V(s) for selected states and avg(R)")
+ax_C.set_title("Visit count for selected states")
+plt.suptitle(f"{learning_method.upper()}")
 
 
 

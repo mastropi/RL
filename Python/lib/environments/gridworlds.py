@@ -807,6 +807,18 @@ class EnvGridworld2D(EnvironmentDiscrete):
         "Returns the list of obstacle states"
         return list(self.set_obstacle_states)
 
+    def getIndexFromState(self, state, simulation=True):
+        """
+        Returns the 1D index representation of the given state
+
+        When simulation=True, `state` must be an integer value representing a 1D index as well, as the state used for simulations is a 1D index
+        When simulation=False, `state` is expected to be a tuple containing the 2D state of the gridworld.
+        """
+        if simulation:
+            return state
+        else:
+            return np.ravel_multi_index(state, self.shape)
+
     def getStateFromIndex(self, s, simulation=True):
         """
         Returns the environment state from the given 1D state index. See more details in documentation for EnvironmentDiscrete.getIndexFromState()
