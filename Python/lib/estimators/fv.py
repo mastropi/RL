@@ -847,7 +847,7 @@ if __name__ == "__main__":
     proba_surv_model = NNBackprop(1 + nS + nA, nn_hidden_layer_sizes, 1,
                                     dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}))
     learning_rate = 0.03
-    optimizer = torch.optim.Adam(proba_surv_model.parameters(), lr=learning_rate, betas=(0.9, 0.999))
+    optimizer = torch.optim.AdamW(proba_surv_model.parameters(), lr=learning_rate, betas=(0.9, 0.999))
 
     # Reset the dictionary that stores the absorption times for each state and action
     dict_proba_surv = dict()

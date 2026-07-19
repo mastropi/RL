@@ -697,6 +697,7 @@ print(f"Neural Network architecture:\n{len(nn_hidden_layer_sizes_policy)} hidden
 
 #----------------------------- MODEL FOR CRITIC -----------------------#
 use_function_approximation = True
+use_separate_target_model = True if use_function_approximation else False; update_period_target_model = 100 #100000
 nn_input_value_functions = InputLayer.STATE  #InputLayer.ONEHOT
 nn_hidden_layer_sizes_value_functions = [12] #[48]
 # Learning rate for value functions
@@ -749,6 +750,7 @@ if env_type == Environment.Gridworld:
                        use_function_approximation=use_function_approximation,
                        nn_input_value_functions=nn_input_value_functions,
                        nn_hidden_layer_sizes_value_functions=nn_hidden_layer_sizes_value_functions,
+                       use_separate_target_model=use_separate_target_model, update_period_target_model=update_period_target_model,
                        # Policy model
                        nn_input_policy=nn_input_policy,
                        nn_hidden_layer_sizes_policy=nn_hidden_layer_sizes_policy,

@@ -37,7 +37,7 @@ from Python.lib.estimators.nn_models import InputLayer, NNBackprop
 from Python.lib.simulators.discrete import Simulator as DiscreteSimulator
 
 from Python.lib.utils.basic import assert_equal_data_frames, show_exec_params
-from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward, compute_transition_matrices, compute_state_value_function_from_transition_matrix
+from Python.lib.utils.computing import compute_set_of_frequent_states_with_zero_reward, compute_state_value_function_from_environment_and_policy
 
 
 class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
@@ -52,6 +52,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                         use_function_approximation=False,
                         nn_input_value_functions: InputLayer=InputLayer.STATE,
                         nn_hidden_layer_sizes_value_functions: list=[12],
+                        use_separate_target_model=False, update_period_target_model=100,
                         # Policy model
                         nn_input_policy: InputLayer=InputLayer.ONEHOT,
                         nn_hidden_layer_sizes_policy: list=[12],
@@ -204,7 +205,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
             cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes_policy, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         elif nn_input_policy == InputLayer.STATE:
             # The actual environment state is used as input of the neural network (the state in the 2D gridworld has dimension 2)
-            cls.nn_model = NNBackprop(2, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+            cls.nn_model = NNBackprop(2, nn_hidden_layer_sizes_policy, cls.env2d.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         else:
             # One-hot encoding or Natural Policy Gradient learning (NPG)
             # Note that NPG requires one input neuron per state because of the way it is currently implemented, namely using a neural network
@@ -224,11 +225,12 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
 
         # Compute the true state value function for the given policy
         # and store it in the environment so that we can compare our estimates with those values when running simulations that estimate the state value function.
-        P_epi, P_con, b_epi, b_con, g, mu = compute_transition_matrices(cls.env2d, cls.policy_nn)
-        P = P_con if learning_task == LearningTask.CONTINUING else P_epi
-        b = b_con if learning_task == LearningTask.CONTINUING else b_epi
-        bias = g if learning_criterion == LearningCriterion.AVERAGE else 0.0
-        V_true = compute_state_value_function_from_transition_matrix(P, b, bias=bias, gamma=gamma)
+        V_true, _ = compute_state_value_function_from_environment_and_policy(cls.env2d, cls.policy_nn, gamma=gamma,
+                                                                             continuing_task=learning_task == LearningTask.CONTINUING,
+                                                                             average_reward_criterion=learning_criterion == LearningCriterion.AVERAGE)
+        # Set the true state value function to missing at obstacles (so that they are not used in the computation of the RMSE below)
+        for s in cls.env2d.getObstacleStates():
+            V_true[s] = np.nan
         cls.env2d.setV(V_true)
         #-- Policy characteristics
 
@@ -351,6 +353,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         # TD(0) learner
         learner_td0 = td.LeaTDLambda( cls.env2d,
                                       dict_function_approximations=dict_function_approximations,
+                                      use_separate_model_for_target_V=use_separate_target_model, update_period_model_for_target_V=update_period_target_model,
                                       criterion=learning_criterion,
                                       task=learning_task,
                                       gamma=cls.gamma,
@@ -367,6 +370,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         # TD(lambda) learner
         learner_tdlambda = td.LeaTDLambda(cls.env2d,
                                           dict_function_approximations=dict_function_approximations,
+                                          use_separate_model_for_target_V=use_separate_target_model, update_period_model_for_target_V=update_period_target_model,
                                           criterion=learning_criterion,
                                           task=learning_task,
                                           gamma=cls.gamma,
@@ -383,6 +387,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
         # Adaptive TD(lambda) learner
         learner_tdlambda_adap = td.LeaTDLambdaAdaptive( cls.env2d,
                                                         dict_function_approximations=dict_function_approximations,
+                                                        use_separate_model_for_target_V=use_separate_target_model, update_period_model_for_target_V=update_period_target_model,
                                                         criterion=learning_criterion,
                                                         task=learning_task,
                                                         gamma=cls.gamma,
@@ -405,6 +410,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                 probas_stationary_start_state_et=None,
                                 probas_stationary_start_state_fv=None,
                                 dict_function_approximations=dict_function_approximations,
+                                use_separate_model_for_target_V=use_separate_target_model, update_period_model_for_target_V=update_period_target_model,
                                 criterion=learning_criterion,
                                 task=learning_task,
                                 gamma=cls.gamma,
@@ -427,6 +433,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                     probas_stationary_start_state_et=None,
                                     probas_stationary_start_state_fv=None,
                                     dict_function_approximations=dict_function_approximations,
+                                    use_separate_model_for_target_V=use_separate_target_model, update_period_model_for_target_V=update_period_target_model,
                                     criterion=learning_criterion,
                                     task=learning_task,
                                     gamma=cls.gamma,
@@ -447,6 +454,7 @@ class Test_EstPolicy_EnvGridworldsWithObstacles(unittest.TestCase):
                                                 probas_stationary_start_state_et=None,
                                                 probas_stationary_start_state_fv=None,
                                                 dict_function_approximations=dict_function_approximations,
+                                                use_separate_model_for_target_V=use_separate_target_model, update_period_model_for_target_V=update_period_target_model,
                                                 criterion=learning_criterion,
                                                 task=learning_task,
                                                 gamma=cls.gamma,
