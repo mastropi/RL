@@ -704,7 +704,7 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             nn_input_V = 2 + 1      # `+1` as a dummy neuron that signals terminal states (so that their value is estimated separately)
             nn_input_Q = 2 + 1 + 1  # `+1` for the dummy neuron for terminal states and `+1` for the action which has an order meaning (i.e. -1: accelerate left, 0: acceleration=0, +1: accelerate right)
             dict_function_approximations = dict(
-                {'V': StateValueFunctionApproxNN(cls.env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
+                {'V': StateValueFunctionApproxNN(cls.env_mc, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  'Q': None, #ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions),
                  #'A': ActionValueFunctionApproxNN(cls.env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_value_functions, dropout=dropout_value_functions, lr=learning_rate_value_functions)
                  })
@@ -716,16 +716,16 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
             # One-hot encoding or Natural Policy Gradient learning (NPG)
             # Note that NPG requires one input neuron per state because of the way it is currently implemented, namely using a neural network
             # although a neural network is not really necessary, it's just a way to simplify the implementation and avoid writing a different policy class.
-            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+            cls.nn_model = NNBackprop(cls.nS, nn_hidden_layer_sizes_policy, cls.env_mc.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         elif nn_input_policy == InputLayer.SINGLE:
-            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+            cls.nn_model = NNBackprop(1, nn_hidden_layer_sizes_policy, cls.env_mc.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         elif nn_input_policy == InputLayer.STATE:
             # The actual environment state is used as input of the neural network (the state in the Mountain Car has dimension 2)
-            cls.nn_model = NNBackprop(2, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+            cls.nn_model = NNBackprop(2, nn_hidden_layer_sizes_policy, cls.env_mc.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU]*len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
         else:
             # Parameter nn_input_policy gives directly the number of input neurons
             _n_input_neurons = nn_input_policy
-            cls.nn_model = NNBackprop(_n_input_neurons, nn_hidden_layer_sizes_policy, 3, dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
+            cls.nn_model = NNBackprop(_n_input_neurons, nn_hidden_layer_sizes_policy, cls.env_mc.getNumActions(), dict_activation_functions=dict({'hidden': [nn.ReLU] * len(nn_hidden_layer_sizes_policy)}), dropout=dropout_policy)
 
         cls.policy_nn = PolNN(cls.env_mc, cls.nn_model, seed=cls.seed)
         print(f"Neural network to model the policy:\n{cls.nn_model}")
@@ -901,6 +901,45 @@ class Test_EstPolicy_EnvMountainCar(unittest.TestCase):
         #cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn, dict({'value': learner_fv, 'policy': actor_critic}))
         cls.agent_nn_fv = agents.GenericAgent(cls.policy_nn.copy(), learner_fv)
         cls.sim_fv = DiscreteSimulator(cls.env_mc, cls.agent_nn_fv, debug=cls.debug)
+
+        learner_fvlambda = fv.LeaFV(cls.env_mc,
+                                    N, T, absorption_set, activation_set=None,
+                                    states_of_interest=cls.env_mc.terminal_states,
+                                    probas_stationary_start_state_et=None,
+                                    probas_stationary_start_state_fv=None,
+                                    dict_function_approximations=dict_function_approximations,
+                                    criterion=learning_criterion,
+                                    task=learning_task,
+                                    gamma=cls.gamma,
+                                    lmbda=lmbda,
+                                    alpha=cls.alpha,
+                                    adjust_alpha=adjust_alpha,
+                                    adjust_alpha_by_episode=False,
+                                    alpha_min=cls.alpha_min,
+                                    reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                    debug=cls.debug)
+        cls.agent_nn_fvl = agents.GenericAgent(cls.policy_nn.copy(), learner_fvlambda)
+        cls.sim_fvl = DiscreteSimulator(cls.env_mc, cls.agent_nn_fvl, debug=cls.debug)
+
+        # Adaptive FV(Lambda) learner
+        learner_fvlambda_adap = fv.LeaFVAdaptive(cls.env_mc,
+                                                N, T, absorption_set, activation_set=None,
+                                                states_of_interest=cls.env_mc.terminal_states,
+                                                probas_stationary_start_state_et=None,
+                                                probas_stationary_start_state_fv=None,
+                                                dict_function_approximations=dict_function_approximations,
+                                                criterion=learning_criterion,
+                                                task=learning_task,
+                                                gamma=cls.gamma,
+                                                lmbda=lmbda,    # This is a dummy lambda, as it is actually not used because the learner is a adaptive TD(Lambda) defined in LeaTDLambdaAdaptive
+                                                alpha=cls.alpha,
+                                                adjust_alpha=adjust_alpha,
+                                                adjust_alpha_by_episode=False,
+                                                alpha_min=cls.alpha_min,
+                                                reset_method=cls.reset_method, reset_params=cls.reset_params, reset_seed=cls.seed,
+                                                debug=cls.debug)
+        cls.agent_nn_fva = agents.GenericAgent(cls.policy_nn.copy(), learner_fvlambda_adap)
+        cls.sim_fva = DiscreteSimulator(cls.env_mc, cls.agent_nn_fva, debug=cls.debug)
 
     def getEnv(self):
         return self.env_mc

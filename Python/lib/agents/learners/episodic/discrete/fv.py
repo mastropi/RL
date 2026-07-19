@@ -529,7 +529,7 @@ class LeaFV(LeaTDLambda):
                 self._update_visit_counts(t, state, action)
                 self._update_alphas(state, action)
 
-            if delta_Q != 0.0 and state in self.env.getTerminalStates():
+            if delta_Q != 0.0 and self.env.getIndexFromState(state) in self.env.getTerminalStates():
                 # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least
                 # Copy the Q value just learned to all the other actions in a terminal state, because no action is taken at the terminal state, so all Q values should have the same value for all the actions
                 for _action in range(self.env.getNumActions()):
@@ -602,7 +602,7 @@ class LeaFV(LeaTDLambda):
             self._update_visit_counts(t_phi, start_state, start_action)
             self._update_alphas(start_state, start_action)
 
-        if delta_Q != 0.0 and start_state in self.env.getTerminalStates():
+        if delta_Q != 0.0 and self.env.getIndexFromState(start_state) in self.env.getTerminalStates():
             # TODO: (2024/01/17) Move this piece of code to a function as this is done already at two places at least
             # Copy the Q value just learned to all the other actions in a terminal state, because no action is taken at the terminal state, so all Q values should have the same value for all the actions
             for _action in range(self.env.getNumActions()):
@@ -1012,7 +1012,7 @@ class LeaFV(LeaTDLambda):
         self.dict_survival_times_for_state[state] += [t_surv]
         self.dict_survival_times_for_state_action[state][action] += [t_surv]
         state_value_killed_process = self._update_integral_by_start_state(state)
-        if state not in self.env.getTerminalStates():
+        if self.env.getIndexFromState(state) not in self.env.getTerminalStates():
             assert action >= 0, f"The start action must be a valid start action, i.e. there must be at least one particle that started at that action (s={state}, a={action})"
             # Note: for terminal states, the Q values are the same for all actions and equal to V(s)
             action_value_killed_process = self._update_integral_by_start_state_action(state, action)

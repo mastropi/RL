@@ -180,7 +180,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
 
         # Store whether the state of this environment is DISCRETE-valued or CONTINUOUS-valued
         # i.e. whether the result of taking an action on the car is computed on the discrete-valued or on the continuous-valued state
-        # This does NOT mean that the state space is infinite. In fact, it is NOT because the state obtained after taking the action is ALWAYS discretized,
+        # This does NOT mean that the state space is infinite. In fact, it is NOT infinite because the state obtained after taking the action is ALWAYS discretized,
         # regardless of how such state is computed.
         self.state_is_continuous = not discrete_state
 
@@ -474,7 +474,7 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         else:
             return self.state, reward, done, info
 
-    def discretize(self, state):
+    def discretize(self, state: tuple):
         """
         Discretizes into 2D indices the given continuous-valued state using the discretization parameters defined in the object (e.g. dx, dv, etc.)
         and self._shape_display_names, which defines the layout of position and velocity in the 2D environment layout used to visually represent the environment.
@@ -704,10 +704,20 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
         return adjacent_states_list
 
     #--- Getters
-    def isTerminalState(self, idx_state: int):
-        state = self.get_state_from_index(idx_state)
-        x = self.getPosition(state)
-        #print("Check terminal state: {} (dx={})".format(state, self.dx))
+    def isTerminalState(self, state_or_state_index: Union[int, tuple]):
+        if self.state_is_continuous:
+            # The given state is a tuple of the form (x, v) giving respectively the position and velocity of the car
+            state_tuple = state_or_state_index
+            assert isinstance(state_tuple, tuple), f"The given state must be a tuple (x, v) when the state is continuous, NOT a 1D index ({state_tuple})"
+            x = self.getPosition(state_tuple)
+        else:
+            # The given state is a 1D index (used in simulations)
+            # => We first need to convert the 1D index into the 2D car state (x, v) so that we can compare its position to the goal's position
+            state_index_1d = state_or_state_index
+            assert is_integer(state_index_1d), f"The given state must be a 1D index when the state is NOT continuous ({state_index_1d})"
+            state = self.get_state_from_index(state_index_1d)
+            x = self.getPosition(state)
+        #print("Checking terminal state: {} (dx={})...".format(state_or_state_index, self.dx))
         return x >= self.goal_position
 
     def getPosition(self, state: tuple):
@@ -837,17 +847,17 @@ class MountainCarDiscrete(MountainCarEnv, EnvironmentDiscrete):
             return idx_state
 
     # MERGED!
-    def getIndexFromState(self, state, simulation=True):
+    def getIndexFromState(self, state_or_state_index: Union[int, tuple], simulation=True):
         """
-        Returns the 1D index representation of the given state. when simulation=True, `state` must be an integer value representing a 1D index as well,
+        Returns the 1D index representation of the given state. When simulation=True, `state_or_state_index` must be an integer value representing a 1D index as well,
         as the state used for simulations is a 1D index (as the state space is discrete, so we can do that).
-        When simulation=False, `state` is expected to be a tuple containing the continuous-valued state.
+        When simulation=False, `state_or_state_index` is expected to be a tuple containing the continuous-valued state.
         """
         if self.state_is_continuous or not simulation:
-            return self.get_index_from_state(state)
+            return self.get_index_from_state(state_or_state_index)
         else:
-            assert is_integer(state), f"The simulation state must be integer: {state}"
-            return state
+            assert is_integer(state_or_state_index), f"The simulation state must be integer when the Mountain Car environment is based on discrete states (self.state_is_continuous=False) or when not working with the simulation state: {state_or_state_index}"
+            return state_or_state_index
 
     def getStateIndicesFromIndex(self, idx_state: int):
         "Returns the 2D state indices associated to the 1D state index"

@@ -570,8 +570,8 @@ learning_criterion = LearningCriterion.AVERAGE; gamma = 1.0    # gamma could be 
 #learning_criterion = LearningCriterion.DISCOUNTED; gamma = 0.9
 
 seed = 1317  # Seed used when creating the test object in test_optimizers_discretetime.py, which in turn is used for: (i) the policy seed at creation (torch.manual_seed(seed)), (ii) the eventual reset seed for value functions in learners (reset_seed=seed) at their creation
-env_type = Environment.Gridworld
-#env_type = Environment.MountainCar
+#env_type = Environment.Gridworld
+env_type = Environment.MountainCar
 env_type_name = env_type.name   # The environment NAME is retrieved to avoid an error that happened at least once (Jun-2025) when saving results to a pickle file: "Can't pickle <enum 'Environment'>: attribute lookup Environment on __main__ failed"
 problem_2d = True
 use_random_obstacles_set = True; prop_obstacles = 0.4; #0.5;
@@ -771,9 +771,9 @@ if env_type == Environment.Gridworld:
     test_ac.setUp()
     print(test_ac.policy_nn.nn_model)
 elif env_type == Environment.MountainCar:
-    N = 30  #50
-    T = 300 #100 #300 #500
-    env_discrete = True #False
+    N = 50 #30  #50
+    T = 500 #300 #100 #300 #500
+    env_discrete = not use_function_approximation #True #False
     dropout_policy = 0.0  #0.5
     initial_policy = [1/3, 1/3, 1/3]
     test_ac = Test_EstPolicy_EnvMountainCar()
@@ -781,8 +781,8 @@ elif env_type == Environment.MountainCar:
                        env_discrete=env_discrete,
                        nx=40,       # Number of points in the discretization of the positions (only used in the continuous-state-dynamic Mountain Car, in which case the "factor for force" parameter is not used)
                        nv=21,       # Number of points in the discretization of the velocities
-                       factor_for_force_and_gravity=10 if not env_discrete else 90, #100, #90, #20, #15,   # Factor controlling the number of discrete positions in the discretized problem --> NOTE: Using `1` is TOO SMALL! (as there are too many points in the grid)
-                       factor_force=1.0,
+                       factor_for_force_and_gravity=100, #10 if not env_discrete else 90, #100, #90, #20, #15,   # Factor controlling the number of discrete positions in the discretized problem --> NOTE: Using `1` is TOO SMALL! (as there are too many points in the grid)
+                       factor_force=20, #1.0,
                        factor_max_speed=3.0,    # Only used in MountainCarDiscrete (with continuous states)
                        # Value functions model
                        use_function_approximation=use_function_approximation,

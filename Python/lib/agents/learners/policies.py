@@ -1164,9 +1164,10 @@ class LeaActorCriticNN(GenericLearner):
         # - the models giving their values must be set in evaluation mode
         #   (this is important only when the model is a NN with dropout layers, so that dropout layers are dropped during evaluation --to reduce overfitting)
         if self.env.isStateContinuous():
-            learner_value_functions_critic.getV().getModel().eval()
-            learner_value_functions_critic.getQ().getModel().eval()
-            learner_value_functions_critic.getA().getModel().eval()
+            if learner_value_functions_critic.getV() is not None:
+                learner_value_functions_critic.getV().getModel().eval()
+            if learner_value_functions_critic.getQ() is not None:
+                learner_value_functions_critic.getQ().getModel().eval()
 
         if self.debug:
             print("Policy for each state and action at the current parameter value:")

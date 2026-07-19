@@ -206,17 +206,19 @@ class StateValueFunctionApprox(LinearValueFunctionApprox):
 
     #--- GETTERS
     def getValue(self, state: int):
+        "Returns the value of the given 1D state index"
         if not self.isValidState(state):
             return None
         return super()._getValue(state)
 
     def getGradient(self, state, delta, is_learner_td_lambda=False):
+        "Returns the gradient of the given 1D state index"
         return self.X[:, state]
 
     #--- SETTERS
     def _setWeight(self, state: int, weight: float):
         """
-        Sets the weight of the given state in the case where the features are dummy features
+        Sets the weight of the given 1D state index in the case where the features are dummy features
 
         NOTE that in the general case of function approximation, the weight would have a reduced dimension
         and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
@@ -338,17 +340,19 @@ class ActionValueFunctionApprox(LinearValueFunctionApprox):
         return state*self.nA + action
 
     def getValue(self, state: int, action: int):
+        "Returns the value of the given 1D state index and the given 1D action index"
         if not self.isValidState(state) or not self.isValidAction(state, action):
             return None
         return super()._getValue(self.getLinearIndex(state, action))
 
     def getGradient(self, state, action, delta, is_learner_td_lambda=False):
+        "Returns the gradient of the given 1D state index and the given 1D action index"
         return self.X[:, self.getLinearIndex(state, action)]
 
     #--- SETTERS
     def _setWeight(self, state: int, action: int, weight: float):
         """
-        Sets the weight of the given state-action in the case where the features are dummy features
+        Sets the weight of the given state-action (given as 1D indices) in the case where the features are dummy features
 
         NOTE that in the general case of function approximation, the weight would have a reduced dimension
         and thus would be indexed by something else, whose meaning depends on what the reduction dimension consists of.
@@ -544,7 +548,7 @@ class ValueFunctionApproxNN:
             state_environment = self.env.getStateFromIndex(idx_state, simulation=False)
                 ## Note: we use simulation=False in order to get the actual physical state of the environment,
                 ## not the state used in simulations, returned when simulation=True, which may not be the same...
-                ## for instance in the discrete-state Mountain Car, the state used in simulations is the 1D state index
+                ## for instance in the discrete-state Mountain Car or in the 2D Gridworld, the state used in simulations is the 1D state index
                 ## because the environment is a discrete-state environment (i.e. where the dynamics is determined by the discrete state, NOT by the continuous state).
 
         return state_environment
@@ -754,7 +758,7 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
         This means that it can be either:
         - a 1D index representation of the environment state, for discrete-state environments (e.g. gridworld, discrete-state Mountain Car)
         - the actual representation of the environment state (e.g. 2D gridworld state, continuous-state Mountain Car, etc.).
-        In this case, an dummy neuron is assumed present in the input layer to mark terminal states so that their values can be learned
+        In this case, a dummy neuron is assumed present in the input layer to mark terminal states so that their values can be learned
         independently of the other states, which is VERY IMPORTANT in CONTINUING learning tasks where terminal states are adjacent to a start state,
         something that cannot usually be inferred from the environment structure.
          """
@@ -777,6 +781,7 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
             # => First we need to convert the simulation state into whatever is input to the neural network, and this is defined by the environment
             #state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation)
             state_multidim = self.getEnvironmentStateFromSimulationState(state_simulation) / np.array(self.env.getShape())
+            assert len(state_multidim) == self.env.getDimension(), f"The dimension of `state_multidim` ({state_multidim}) must be equal to the dimension of the environment state (after conversion from the simulation state ({state_simulation}))"
 
             dim_state = len(state_multidim)
             if self.nn_model.getNumInputs() == dim_state:
@@ -789,7 +794,7 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
                                                                 "(useful in CONTINUING learning tasks where a resetting to a start state is done, once a terminal state is reached)"
                 input = np.zeros(dim_state + 1, dtype=float)
                 input[:dim_state] = np.array(state_multidim)
-                input[dim_state] = int(state_simulation in self.env.getTerminalStates())
+                input[dim_state] = int(self.env.getIndexFromState(state_simulation) in self.env.getTerminalStates())
 
                 state_value = self.nn_model(input.astype(float))
 
@@ -803,7 +808,7 @@ class StateValueFunctionApproxNN(ValueFunctionApproxNN):
         "Returns the state values given by the model for each possible state in the environment"
         state_values = np.nan * np.ones(self.nS)
         for s in range(self.nS):
-            state_values[s] = self.getValue(s)
+            state_values[s] = self.getValue(self.env.getStateFromIndex(s))
         return state_values
 
     def getGradient(self, state, delta, is_learner_td_lambda=False):
@@ -963,7 +968,7 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
                 assert self.nn_model.getNumInputs() == dim_state + 1 + self.nA, "There must be only ONE more neuron complementing the state, which is used to mark terminal states " \
                                                                 "(useful in CONTINUING learning tasks where a resetting to a start state is done, once a terminal state is reached)"
                 input = np.zeros(dim_state + 1 + self.nA, dtype=float)
-                input[dim_state + 1] = int(state_simulation in self.env.getTerminalStates())
+                input[dim_state + 1] = int(self.env.getIndexFromState(state_simulation) in self.env.getTerminalStates())
                 input[dim_state + 1 + action] = 1
 
             # Assign the state to the first `dim_state` neurons
@@ -988,7 +993,7 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
         action_values = np.nan * np.ones((self.nS, self.nA))
         for s in range(self.nS):
             for a in range(self.nA):
-                action_values[s, a] = self.getValue(s, a)
+                action_values[s, a] = self.getValue(self.env.getStateFromIndex(s), a)
         return action_values.reshape(-1)
 
     def getGradient(self, state, action, delta, is_learner_td_lambda=False):
@@ -1273,8 +1278,13 @@ if __name__ == "__main__":
     seed = 1717 #1317
     debug = True
 
-    #env_type = Environment.MountainCar
-    env_type = Environment.Gridworld
+    env_type = Environment.MountainCar
+    #env_type = Environment.Gridworld
+
+    # We define whether to use a neural network model for value functions BEFORE the environment definition because, in the case of the Mountain Car,
+    # the state space is "continuous" (i.e. the simulation state is the 2D state (x, v)) when an NN is used and otherwise it is "discrete"
+    # (i.e. the simulation state is the 1D index representing the discrete state).
+    use_neural_network = True
 
     time_start = timer()
     time_start_cpu = process_time()
@@ -1315,198 +1325,248 @@ if __name__ == "__main__":
                                         initial_state_distribution=isd)
         env2d.plot()
 
-        # Value function learner characteristics
-        plot_online = False    # Generate plots during ONLINE learning
-        plot_batch = False #True
-        use_neural_network = True
-        use_separate_model_for_target_V = True
-        # Whether to use the average reward computed from the A-estimation step as a FIXED average reward (correction) value (as opposed to iteratively updated)
-        # in the FV learning of differential value functions. Note that the TD learning of the differential value functions ALWAYS uses an iterative update
-        # of the average reward because there is no warm estimate of the expected reward that could be used in its place...
-        # In FV, in principle it is much better to set use_fixed_average_reward_fv = True, which is Keith Ross's approach to the computation of the average reward.
-        # For an example of what happens when using either case see entry on Sun, 17-May-2026 in FVRL-Meetings.docx.
-        use_fixed_average_reward_fv = True
-
-        learning_mode = LearningMode.ONLINE
-        #learning_mode = LearningMode.BATCH
-        batch_size = 50; epochs = 50; sampling_rate = 1.0; oversample = False
-        batch_size = 50; epochs = 25; sampling_rate = 1.0; oversample = False   # use 25 epochs for faster learning than with 50
-
-        learner_type = "fv" #"td"
-        lr = 1E-2 #1E-1 #1E-2 #1E-3
-        nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
-        nn_input_V = env2d.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
-        nn_input_Q = env2d.getNumStates() + env2d.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env2d.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
-        # See Ref: https://stats.stackexchange.com/questions/181/how-to-choose-the-number-of-hidden-layers-and-nodes-in-a-feedforward-neural-netw
-        # for recommendations written in 2010 about number of hidden layers and their sizes.
-        # Summary:
-        # - # hidden layers: 1 (adding new layers rarely improves performance)
-        # - [NOT TRUE] size of hidden layer: average between number of input and number of output neurons
-        #   --> I've tried using this (in my case it boiled down to 2 neurons, when nn_input = InputLayer.STATE)
-        # (2025/08/04) In my case:
-        # a) when using more neurons in hidden layer (e.g. 48 instead of 12), the estimation of V(s) becomes more curved... but actually NOT better...
-        # b) when using more hidden layers, it seems there is a vanishing gradient problem because the value function V(s) is hardly updated, even with larger alpha = 10!
-        nn_hidden_layer_sizes_V = [12] #[144] #[48, 12] #[128] #[12] #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_V, 1])))]
-        #nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
-        dict_function_approximations = None
-        if use_neural_network:
-            dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env2d, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V, lr=lr),
-                                                 'Q': None, #ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr),
-                                                 #'A': ActionValueFunctionApproxNN(env2d, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
-                                                 })
-
-        # Policy characteristics (the policy model is currently ONLY used to define the dynamics but it is NOT learned, only value functions are learned)
-        nn_hidden_layer_sizes_P = []
-        nn_model_policy = NNBackprop(env2d.getNumStates(), nn_hidden_layer_sizes_P, env2d.getNumActions(), dict_activation_functions=dict({'hidden': [torch.nn.ReLU]*len(nn_hidden_layer_sizes_P)}))
-        policy_nn = PolNN(env2d, nn_model_policy, seed=seed)
-        print(f"Neural network to model the policy:\n{nn_model_policy}")
-        print(f"Policy values for each state:\n{policy_nn.get_policy_values()}")
-
-        # Initialize the policy to the given initial policy
-        policy_nn.reset()
-        print(f"Policy network parameters initialized as follows:\n{list(policy_nn.getThetaParameter())}")
-        print(f"Initial policy for all states (states x actions = {env_shape}:")
-        policy_probabilities = policy_nn.get_policy_values()
-        print(policy_probabilities)
-
-        #-- Value function learners
-        learning_task = LearningTask.CONTINUING
-        learning_criterion = LearningCriterion.AVERAGE
-        gamma = 1.0
-        # IMPORTANT: The value of lambda does NOT affect the estimate of V(s), just the estimate of H(s,a),
-        # since V(s) is optimized using the Adam optimizer which is based on the ONE-STEP TD error as the loss.
-        lmbda = 0.7 #0.0
-        # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
-        # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
-        # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
-        alpha_ini = 1.0 #1.0 if learner_type == "td" or not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
-        alpha_min = 0.0 if learning_mode == LearningMode.BATCH else alpha_ini/10
-        print(f"Initial alpha = {alpha_ini} and then alpha(t) >= {alpha_min}")
-
-        # Learner (TD)
-        learner_td = td.LeaTDLambda( env2d,
-                                     dict_function_approximations=dict_function_approximations,
-                                     use_separate_model_for_target_V=use_separate_model_for_target_V,
-                                     task=learning_task,
-                                     criterion=learning_criterion,
-                                     gamma=gamma,
-                                     lmbda=lmbda,
-                                     alpha=alpha_ini,
-                                     adjust_alpha=True, #not use_neural_network,  # We should NOT adjust the learning rate when using neural networks because the learning rate is defined by the NN optimizer (e.g. Adam)
-                                     adjust_alpha_by_episode=False,
-                                     alpha_min=alpha_min,
-                                     debug=False)
-        agent_td = agents.GenericAgent(policy_nn, learner_td)
-        sim_td = Simulator(env2d, agent_td, debug=debug)
-
-        # Learner FV
-        N = 50
-        T = 1000 #500   # Note: T = 500 might be too small to generate sensible estimate of V(s) with ONLINE learning
-        learner_fv = fv.LeaFV(  env2d,
-                                N, T, set(), None,
-                                states_of_interest=None,
-                                probas_stationary_start_state_et=None,
-                                probas_stationary_start_state_fv=None,
-                                dict_function_approximations=dict_function_approximations,
-                                use_separate_model_for_target_V=use_separate_model_for_target_V,
-                                task=learning_task,
-                                criterion=learning_criterion,
-                                gamma=gamma,
-                                lmbda=lmbda,
-                                alpha=alpha_ini,
-                                adjust_alpha=True, #not use_neural_network, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
-                                adjust_alpha_by_episode=False,
-                                alpha_min=alpha_min,
-                                debug=False)
-        agent_fv = agents.GenericAgent(policy_nn, learner_fv)
-        sim_fv = Simulator(env2d, agent_fv, debug=debug)
-
-        # Compute the true state value function so that we can analyze the quality of the estimated value function and we store it in the environment so that we can use it in plots
-        V_true, _ = computing.compute_state_value_function_from_environment_and_policy( env2d, policy_nn, gamma=gamma,
-                                                                                        continuing_task=learning_task == LearningTask.CONTINUING,
-                                                                                        average_reward_criterion=learning_criterion == LearningCriterion.AVERAGE)
-        # Set the true state value function to missing at obstacles (so that they are not used in the computation of the RMSE below)
-        for s in env2d.getObstacleStates():
-            V_true[s] = np.nan
-        env2d.setV(V_true)
-
-        # Simulation
-        if learner_type == "fv":
-            V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
-                sim_fv.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
-                           max_time_steps=None, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,   # Note: It's useless to set `update_absorption_set_with_fv_visits=True` because this only affects the case in which the policy is also learned, as the absorption set can be updated for the NEXT policy learning step.
-                           use_average_reward_stored_in_learner=True, use_fixed_average_reward=use_fixed_average_reward_fv,
-                           keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=False,
-                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
-            sim = sim_fv
-        else:
-            T = 3500 #1500 #5000 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy, and 3500 is ~ #steps used by FV
-            #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
-            V, Q, A, state_counts, _, _, learning_info = \
-                sim_td.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
-                           max_time_steps=T,
-                           use_fixed_average_reward=False, estimated_average_reward=0.0,
-                           seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
-            sim = sim_td
-
-        if learning_mode == LearningMode.BATCH: # Use `if False` when BATCH learning is already done by the Simulator.run() method (something that is hard-coded in Simulator.run())
-            # Learn NOW!
-            learner = sim.getAgent().getLearner()
-            loss_values_train, loss_values_true = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, seed=seed, verbose=True, plot=plot_batch)
-            plt.figure()
-            plt.plot(np.arange(1, len(loss_values_train)+1), loss_values_train, 'r.-')
-            plt.plot(np.arange(1, len(loss_values_true)+1), loss_values_true, 'g.-')
-            plt.gca().set_xlabel("Epoch")
-            plt.gca().set_ylabel("Loss")
-            plt.title(f"Training loss for {learner_type.upper()}")
-            plt.legend(["Estimated Loss", "True Loss"])
-            plt.show()
-
-        # Plot
-        ax_V, ax_alphas = test_utils.plot_estimated_state_value_function(env2d, sim.getAgent().getLearner().getV().getValues(), learning_criterion,
-                                                                         state_counts=sim.getAgent().getLearner().getStateCounts(), alphas=sim.getAgent().getLearner().getAlphasByState())
-        plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T} (Mode = {learning_mode.name})")
-
-        # Plot the advantage function and V(s) on top of it
-        learner = sim.getAgent().getLearner()
-        ax = plt.figure().subplots(1, 1)
-        ax.plot(np.arange(0, len(learner.getA().getValues()), 4), learner.getV().getValues() - np.mean(learner.getV().getValues()), 'r.-')
-        ax2 = ax.twinx()
-        ax2.plot(learner.getA().getValues(), 'g.-')
-        ax.set_xlabel("(s,a)")
-        ax.set_ylabel("V(s)")
-        ax2.set_ylabel("A(s,a)")
-        # Labels for actions
-        for i in np.arange(len(learner.A.getValues())):
-            ax2.text(i, learner.A.getValues()[i], str(np.mod(i, 4) + 1), verticalalignment="bottom", color="black", fontsize=8)
-        plt.title(f"V(s) and A(s,a) for {learner_type.upper()}")
-        plt.show()
-
-    elif env_type == Environment.MountainCar:
+        env = env2d
+    else:
         # NOTE: (2025/07/09) Use discrete_state=True in order to test the trickier case where the physical state (x, v) and the simulation state (1D index) are NOT the same
         # (recall that in the discrete_state=False case (i.e. when the Mountain Car state is treated as continuous, both representations (physical and simulation) are the same
         # and equal to (x, v)).
-        env_mc = MountainCarDiscrete(nx=20, nv=20, factor_for_force_and_gravity=10, discrete_state=False, seed_reset=seed)
+        problem_difficulty = {'easy': {'factor_force': 20, 'factor_for_force_and_gravity': 100},
+                              'difficulty': {'factor_force': 1, 'factor_for_force_and_gravity': 10}
+                              }
+        difficulty_level = 'easy'
+        env_mc = MountainCarDiscrete(nx=20, nv=20, factor_force=problem_difficulty[difficulty_level]['factor_force'],
+                                     discrete_state=not use_neural_network,
+                                     seed_reset=seed)
         nS = env_mc.getNumStates()
 
-        #-- Value function learner characteristics
-        nn_hidden_layer_sizes = [4]
-        dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env_mc, nn_input=env_mc.dim, nn_hidden_layer_sizes=nn_hidden_layer_sizes),
-                                             'Q': ActionValueFunctionApproxNN(env_mc, nn_input=env_mc.dim + 1, nn_hidden_layer_sizes=nn_hidden_layer_sizes),    # +1 for the action
-                                             'A': ActionValueFunctionApproxNN(env_mc, nn_input=env_mc.dim + 1, nn_hidden_layer_sizes=nn_hidden_layer_sizes)})   # +1 for the action
+        env = env_mc
 
+    #--- Execution parameters
+    # Value function learner characteristics
+    plot_online = False    # Generate plots during ONLINE learning
+    plot_batch = False #True
+    use_separate_model_for_target_V = True
+    # Whether to use the average reward computed from the A-estimation step as a FIXED average reward (correction) value (as opposed to iteratively updated)
+    # in the FV learning of differential value functions. Note that the TD learning of the differential value functions ALWAYS uses an iterative update
+    # of the average reward because there is no warm estimate of the expected reward that could be used in its place...
+    # In FV, in principle it is much better to set use_fixed_average_reward_fv = True, which is Keith Ross's approach to the computation of the average reward.
+    # For an example of what happens when using either case see entry on Sun, 17-May-2026 in FVRL-Meetings.docx.
+    use_fixed_average_reward_fv = True
+
+    learning_mode = LearningMode.ONLINE
+    #learning_mode = LearningMode.BATCH
+    batch_size = 50; epochs = 50; sampling_rate = 1.0; oversample = False
+    batch_size = 50; epochs = 25; sampling_rate = 1.0; oversample = False   # use 25 epochs for faster learning than with 50
+
+    learner_type = "fv"
+    lr = 1E-3 #1E-2 #1E-1 #1E-2 #1E-3
+    nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
+    nn_input_V = env.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
+    nn_input_Q = env.getNumStates() + env.getNumActions() if nn_input == InputLayer.ONEHOT else 2 + 1 + env.getNumActions() if nn_input == InputLayer.STATE else 1 + 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
+    # See Ref: https://stats.stackexchange.com/questions/181/how-to-choose-the-number-of-hidden-layers-and-nodes-in-a-feedforward-neural-netw
+    # for recommendations written in 2010 about number of hidden layers and their sizes.
+    # Summary:
+    # - # hidden layers: 1 (adding new layers rarely improves performance)
+    # - [NOT TRUE] size of hidden layer: average between number of input and number of output neurons
+    #   --> I've tried using this (in my case it boiled down to 2 neurons, when nn_input = InputLayer.STATE)
+    # (2025/08/04) In my case:
+    # a) when using more neurons in hidden layer (e.g. 48 instead of 12), the estimation of V(s) becomes more curved... but actually NOT better...
+    # b) when using more hidden layers, it seems there is a vanishing gradient problem because the value function V(s) is hardly updated, even with larger alpha = 10!
+    nn_hidden_layer_sizes_V = [48] #[12] #[144] #[48, 12] #[128] #[12] #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_V, 1])))]
+    #nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
+    dict_function_approximations = None
+    if use_neural_network:
+        dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V, lr=lr),
+                                             'Q': None, #ActionValueFunctionApproxNN(env, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr),
+                                             #'A': ActionValueFunctionApproxNN(env, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
+                                             })
+
+    # Policy characteristics (the policy model is currently ONLY used to define the dynamics but it is NOT learned, only value functions are learned)
+    nn_hidden_layer_sizes_P = []
+    nn_model_policy = NNBackprop(env.getNumStates(), nn_hidden_layer_sizes_P, env.getNumActions(), dict_activation_functions=dict({'hidden': [torch.nn.ReLU]*len(nn_hidden_layer_sizes_P)}))
+    policy_nn = PolNN(env, nn_model_policy, seed=seed)
+    print(f"Neural network to model the policy:\n{nn_model_policy}")
+
+    # Initialize the policy to the given initial policy
+    policy_nn.reset()
+    print(f"Policy network parameters initialized as follows:\n{list(policy_nn.getThetaParameter())}")
+    print(f"Initial policy for all states" + f" (states x actions = {env_shape}:" if env_type == Environment.Gridworld else ":")
+    policy_probabilities = policy_nn.get_policy_values()
+    print(policy_probabilities)
+
+    #-- Value function learners
+    learning_task = LearningTask.CONTINUING
+    learning_criterion = LearningCriterion.AVERAGE
+    gamma = 1.0
+    # IMPORTANT: The value of lambda does NOT affect the estimate of V(s), just the estimate of H(s,a),
+    # since V(s) is optimized using the Adam optimizer which is based on the ONE-STEP TD error as the loss.
+    lmbda = 0.7 #0.0
+    # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
+    # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
+    # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
+    alpha_ini = 1.0 #1.0 if learner_type == "td" or not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
+    alpha_min = 0.0 if learning_mode == LearningMode.BATCH else alpha_ini/10
+    print(f"Initial alpha = {alpha_ini} and then alpha(t) >= {alpha_min}")
+
+    # Learner (TD)
+    learner_td = td.LeaTDLambda( env,
+                                 dict_function_approximations=dict_function_approximations,
+                                 use_separate_model_for_target_V=use_separate_model_for_target_V,
+                                 task=learning_task,
+                                 criterion=learning_criterion,
+                                 gamma=gamma,
+                                 lmbda=lmbda,
+                                 alpha=alpha_ini,
+                                 adjust_alpha=True, #not use_neural_network,  # We should NOT adjust the learning rate when using neural networks because the learning rate is defined by the NN optimizer (e.g. Adam)
+                                 adjust_alpha_by_episode=False,
+                                 alpha_min=alpha_min,
+                                 debug=False)
+    agent_td = agents.GenericAgent(policy_nn, learner_td)
+    sim_td = Simulator(env, agent_td, debug=debug)
+
+    # Learner FV
+    N = 50
+    T = 1000 #500   # Note: T = 500 might be too small to generate sensible estimate of V(s) with ONLINE learning
+    learner_fv = fv.LeaFV(  env,
+                            N, T, set(), None,
+                            states_of_interest=None,  # TODO: (2026/05/18) PROBLEM IN THE Mountain Car ENVIRONMENT: The set of terminal states is NOT a single state but they ALL represent the same goal => by using the default states of interest (defined by the set of terminal states) we will be estimating the probability of EACH of those states, separately... but that does NOT reflect the probability of reaching the GOAL!!
+                            probas_stationary_start_state_et=None,
+                            probas_stationary_start_state_fv=None,
+                            dict_function_approximations=dict_function_approximations,
+                            use_separate_model_for_target_V=use_separate_model_for_target_V,
+                            task=learning_task,
+                            criterion=learning_criterion,
+                            gamma=gamma,
+                            lmbda=lmbda,
+                            alpha=alpha_ini,
+                            adjust_alpha=True, #not use_neural_network, # We do NOT adjust the learning rate alpha when value functions are learned by function approximation (NN) because the adjustment is done by the optimizer
+                            adjust_alpha_by_episode=False,
+                            alpha_min=alpha_min,
+                            debug=False)
+    agent_fv = agents.GenericAgent(policy_nn, learner_fv)
+    sim_fv = Simulator(env, agent_fv, debug=debug)
+
+    if env_type == Environment.Gridworld:
+        # Compute the true state value function so that we can analyze the quality of the estimated value function and we store it in the environment so that we can use it in plots
+        V_true, _ = computing.compute_state_value_function_from_environment_and_policy( env, policy_nn, gamma=gamma,
+                                                                                        continuing_task=learning_task == LearningTask.CONTINUING,
+                                                                                        average_reward_criterion=learning_criterion == LearningCriterion.AVERAGE)
+        # Set the true state value function to missing at obstacles (so that they are not used in the computation of the RMSE below)
+        for s in env.getObstacleStates():
+            V_true[s] = np.nan
+        env.setV(V_true)
+
+    # Simulation
+    if learner_type == "fv":
+        V, Q, A, state_counts, state_counts_et, probas_stationary, expected_reward, expected_absorption_time, n_cycles_absorption_used, n_events_a, n_events_et, n_events_fv = \
+            sim_fv.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
+                       max_time_steps=None, estimate_absorption_set=True, update_absorption_set_with_fv_visits=False,   # Note: It's useless to set `update_absorption_set_with_fv_visits=True` because this only affects the case in which the policy is also learned, as the absorption set can be updated for the NEXT policy learning step.
+                       use_average_reward_stored_in_learner=True, use_fixed_average_reward=use_fixed_average_reward_fv,
+                       keep_fv_estimation_of_average_reward_and_stationary_probability_consistent=False,
+                       seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
+        sim = sim_fv
+    else:
+        T = 3500 #1500 #5000 #1000  # 1500 is ~ #steps used by FV when N = 50, T = 500 under random policy, and 3500 is ~ #steps used by FV
+        #sim_td.run_exploration_and_learn_value_functions(max_time_steps=T, seed=seed, verbose=debug, verbose_period=1)
+        V, Q, A, state_counts, _, _, learning_info = \
+            sim_td.run(learning_mode=LearningMode.ONLINE, #learning_mode,   # Use LearningMode.ONLINE when we want to learn the value functions both ONLINE + BATCH (as long as learning_mode=LearningMode.BATCH
+                       max_time_steps=T,
+                       use_fixed_average_reward=False, estimated_average_reward=0.0,
+                       seed=seed, verbose=debug, verbose_period=T // 20, plot=plot_online)
+        sim = sim_td
+
+    if learning_mode == LearningMode.BATCH: # Use `if False` when BATCH learning is already done by the Simulator.run() method (something that is hard-coded in Simulator.run())
+        # Learn NOW!
+        learner = sim.getAgent().getLearner()
+        loss_values_train, loss_values_true = nn_train(learner, batch_size=batch_size, epochs=epochs, sampling_rate=sampling_rate, oversample=oversample, seed=seed, verbose=True, plot=plot_batch)
+        plt.figure()
+        plt.plot(np.arange(1, len(loss_values_train)+1), loss_values_train, 'r.-')
+        plt.plot(np.arange(1, len(loss_values_true)+1), loss_values_true, 'g.-')
+        plt.gca().set_xlabel("Epoch")
+        plt.gca().set_ylabel("Loss")
+        plt.title(f"Training loss for {learner_type.upper()}")
+        plt.legend(["Estimated Loss", "True Loss"])
+        plt.show()
+
+    # Plot
+    ax_V, ax_alphas = test_utils.plot_estimated_state_value_function(env, sim.getAgent().getLearner().getV().getValues(), learning_criterion,
+                                                                     state_counts=sim.getAgent().getLearner().getStateCounts(), alphas=sim.getAgent().getLearner().getAlphasByState())
+    plt.suptitle(rf"{'NN (input=' + nn_input.name + ', hidden=' + str(nn_hidden_layer_sizes_V) + ')' if use_neural_network else 'Tabular'}: {learner_type.upper()}, $\lambda$ = {lmbda}, T = {T} (Mode = {learning_mode.name})")
+
+    # Plot the advantage function and V(s) on top of it
+    learner = sim.getAgent().getLearner()
+    ax = plt.figure().subplots(1, 1)
+    ax.plot(np.arange(0, len(learner.getA().getValues()), env.getNumActions()), learner.getV().getValues() - np.mean(learner.getV().getValues()), 'r.-')
+    ax2 = ax.twinx()
+    ax2.plot(learner.getA().getValues(), 'g.-')
+    ax.set_xlabel("(s,a)")
+    ax.set_ylabel("V(s)")
+    ax2.set_ylabel("A(s,a)")
+    # Labels for actions
+    for i in np.arange(len(learner.A.getValues())):
+        ax2.text(i, learner.A.getValues()[i], str(np.mod(i, 4) + 1), verticalalignment="bottom", color="black", fontsize=8)
+    plt.title(f"V(s) and A(s,a) for {learner_type.upper()}")
+    plt.show()
+
+    time_end = timer()
+    time_end_cpu = process_time()
+    time_elapsed = time_end - time_start
+    time_elapsed_cpu = time_end_cpu - time_start_cpu
+    print("Execution time: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed, time_elapsed / 60, time_elapsed / 3600))
+    print("Execution time CPU: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed_cpu, time_elapsed_cpu / 60, time_elapsed_cpu / 3600))
+
+    if False and env_type == Environment.MountainCar:
+        # `if False` because this may take a LONG time...
+        print("Generating the Mountain Car trajectory as a GIF file...")
+        learner = sim.getAgent().getLearner()
+        trajectory = learner.getStates()
+
+        # Plot the trajectory of the car
+        # Note that we limit the trajectory to the first 100 steps because o.w. the GIF would take too long to generate...
+        # For instance, with 100 steps, the GIF takes ~2 minutes to generate and is 1 MB in size already!
+        npoints2plot = min(T, 550)
+
+        # If we want to make comparable plots (i.e. the same first T steps for both FVAC and TDAC)
+        trajectory2plot = trajectory[:npoints2plot]
+        indices2plot = np.arange(npoints2plot)
+
+        if True:
+            # If we want to plot the beginning and end of the trajectory
+            if npoints2plot < T:
+               # We repeat 10 times the last point in the first half of the points to plot so that we visually understand that there is a jump in time
+               indices2plot = np.r_[np.arange(npoints2plot // 2), np.repeat(npoints2plot // 2, 10), np.arange(T - npoints2plot // 2, T)]
+            else:
+               indices2plot = np.arange(T)
+        trajectory2plot = np.array(trajectory)[indices2plot]
+
+        env.plot_trajectory_gif(trajectory2plot)
+
+
+
+    if False:
+        #-------------- (2026/05/18) PREVIOUS EXECUTION OF THE MOUNTAIN CAR ENVIRONMENT, WHEN THINGS WERE NOT UNIFIED WITH THE GRIDWOLRD ENVIRONMENT
+        #-- Value function learner characteristics
+        use_neural_network = True
+        if use_neural_network:
+            nn_hidden_layer_sizes = [12]
+            dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env_mc, nn_input=env_mc.dim, nn_hidden_layer_sizes=nn_hidden_layer_sizes),
+                                                 'Q': None})
         #-- Simulation characteristics
         N = 5
         T = max_time_steps = 50
 
         #-- Policy characteristics
-        nn_model = NNBackprop(input_size=env_mc.dim, hidden_sizes=nn_hidden_layer_sizes, output_size=3, dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes)}))
+        nn_hidden_layer_sizes_P = [12]
+        nn_model = NNBackprop(input_size=env_mc.dim, hidden_sizes=nn_hidden_layer_sizes_P, output_size=env_mc.getNumActions(), dict_activation_functions=dict({'hidden': [torch.nn.ReLU] * len(nn_hidden_layer_sizes_P)}))
         policy_nn = PolNN(env_mc, nn_model, seed=seed)
         print(f"Neural network to model the policy:\n{nn_model}")
 
-        # Initialize the policy to a random initial policy
-        policy_nn.reset(initial_values=None)
+        # Initialize the policy to the given initial policy
+        policy_nn.reset()
         print(f"Policy network parameters initialized as follows:\n{list(policy_nn.getThetaParameter())}")
+        print(f"Initial policy:")
+        policy_probabilities = policy_nn.get_policy_values()
+        print(policy_probabilities)
 
         # Estimate the Absorption set
         # Perform an initial exploration of the environment in order to define the absorption set based on visit frequency and observed non-zero rewards
@@ -1582,10 +1642,3 @@ if __name__ == "__main__":
                                       seed=131713,
                                       verbose=True,
                                       verbose_period=1)
-
-    time_end = timer()
-    time_end_cpu = process_time()
-    time_elapsed = time_end - time_start
-    time_elapsed_cpu = time_end_cpu - time_start_cpu
-    print("Execution time: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed, time_elapsed / 60, time_elapsed / 3600))
-    print("Execution time CPU: {:.1f} sec, {:.1f} min, {:.1f} hours".format(time_elapsed_cpu, time_elapsed_cpu / 60, time_elapsed_cpu / 3600))

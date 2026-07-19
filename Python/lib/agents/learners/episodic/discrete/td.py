@@ -37,7 +37,6 @@ class LeaTDLambda(Learner):
         - getNumActions()
         - getNumStates()
         - getAllStates()
-        - getTerminalStates()
 
     store_history_over_all_episodes: (opt) bool
         Whether to store in the attributes of the generic super class storing the trajectory
@@ -177,7 +176,7 @@ class LeaTDLambda(Learner):
             #if not self.V.isTabular() and (t + 1) % self.update_period_model_for_target_V == 0:
             #    self.V_target.setModelParameters(self.V.getModelParameters())
 
-            # print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self.getAlphaForState(state)))
+            #print("episode {}, state {}: count = {}, alpha = {}".format(self.episode, state, self._state_counts_over_all_episodes[state], self.getAlphaForState(self.env.getIndexFromState(state))))
             # Store the learning rates to be used in the value functions update
             self.store_learning_rate(self.getAlphasByState())
 
@@ -204,7 +203,7 @@ class LeaTDLambda(Learner):
             # where TD-error should be the one-step TD-error computed on a FIXED V(s) estimation (within an episode or epoch),
             # and this is why we use delta_V_fixed to multiply the eligibility trace self._z_A, as opposed to using `delta`.
             # (for more details, see my notes at the back of the SAS loose sheets, with date 15-Oct-2025 then copied to the SPSS notebook).
-            #self._updateV(delta_V_fixed*self._z_A[self.A.getLinearIndex(state, action)] if self.lmbda > 0 else delta_V_fixed, state=state)
+            #self._updateV(delta_V_fixed*self._z_A[self.A.getLinearIndex(self.env.getIndexFromState(state), action)] if self.lmbda > 0 else delta_V_fixed, state=state)
             ###### TEMPORARY-TD(LAMBDA)
 
             # From Sutton, page 300, where they talk about TRUE online TD(lambda)
@@ -228,7 +227,7 @@ class LeaTDLambda(Learner):
                 # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
                 # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
-                _alphas = self.getAlphaForState(state)
+                _alphas = self.getAlphaForState(self.env.getIndexFromState(state))
             self._alphas_effective = np.r_[self._alphas_effective, (_alphas * self._z_V).reshape(1, len(self._z_V))]
                 ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
                 ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
@@ -418,14 +417,14 @@ class LeaTDLambda(Learner):
         # Actually GAE is the same as TD(lambda), but it just has a different name because what is updated is not the state value function, as in TD(lambda), but the advantage.
         A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
         # Set the component of A_vector that will be affected (in _updateA()) by delta_V, to update the advantage of the currently visited state-action
-        A_vector[self.A.getLinearIndex(state, action)] = 1.0
+        A_vector[self.A.getLinearIndex(self.env.getIndexFromState(state), action)] = 1.0
         # We define the eligibility trace of the advantage function following Sutton, page 300, where they talk about TRUE online TD(lambda).
         # The goal is to better implement GAE(lambda) (the Generalized Advantage Estimator) compared to plain GAE(lambda).
         # What we do here mimics TRUE online TD(lambda), which is based on defining the TD error as R(t+1) + gamma * V_t(S(t+1)) - V_{t-1}(S(t)),
         # i.e. by using the PREVIOUS estimate of v(S(t)) as subtracting predicted value, instead of the current estimate V_t(S(t)).
         # Ref: http://incompleteideas.net/book/first/ebook/node76.html
         self._z_A = self.gamma * lmbda * self._z_A + \
-                    (1 - int(use_true_GAE) * self.gamma * lmbda * self._z_A[self.A.getLinearIndex(state, action)]) * A_vector
+                    (1 - int(use_true_GAE) * self.gamma * lmbda * self._z_A[self.A.getLinearIndex(self.env.getIndexFromState(state), action)]) * A_vector
         self._z_A_all = np.r_[self._z_A_all, self._z_A.reshape(1, len(self._z_A))]
 
     def _updateV(self, delta, state):
@@ -433,9 +432,10 @@ class LeaTDLambda(Learner):
             if self.V.isTabular():
                 # As many learning rates alpha as number of states: each state affected by the eligibility trace will have their own alpha
 
-                # IMPORTANT: (2020/11/11) Note that we use self.getAlphasByState() and NOT self.getAlphaForState(state) as alpha values for each state affected by the eligibility trace
-                # as the former method gives the alpha value for EACH eligible state, which may be different from the alpha for the CURRENTLY visited `state`, retrieved by the latter
-                # method. In the latter case, we would be using the SAME learning rate alpha for the update of ALL states, and this is NOT how the alpha value should be applied.
+                # IMPORTANT: (2020/11/11) Note that we use self.getAlphasByState() and NOT self.getAlphaForState(state) to retrieve the alpha values for each state
+                # as the former method gives the alpha value for EACH state in the eligibility trace, which may be different from the alpha value for the CURRENTLY visited `state`,
+                # which is retrieved by the latter method.
+                # In the latter case, we would be using the SAME learning rate alpha for the update of ALL states, and this is NOT how the alpha value should be applied.
                 # (as we should apply the alpha associated to the state that decreases with the number of visits to EACH state --which happens differently).
                 # However, using the same alpha seems to give slightly faster convergence than the state-based alpha strategy, at least in the gridworld environment.
                 _alphas = self.getAlphasByState()
@@ -443,7 +443,7 @@ class LeaTDLambda(Learner):
                 # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
                 # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing V(s).
-                _alphas = self.getAlphaForState(state)
+                _alphas = self.getAlphaForState(self.env.getIndexFromState(state))
 
             #-- TESTING THE LEARNING PROCESS BY A NEURAL NETWORK BY PROVIDING THE TRUE FUNCTION VALUE
             # CONCLUSION: Option 2 works as long as we convert the sum we do in my V._compute_loss() function to a tensor!!!! (o.w. the gradient is zero! ARRRGHRHHRHHH!!!)
@@ -487,7 +487,7 @@ class LeaTDLambda(Learner):
                 # Use the alpha associated to the currently visited state and action as learning rate for ALL state-actions visited in the past,
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
-                _alphas2 = self.getAlphaForStateAction(state, action)
+                _alphas2 = self.getAlphaForStateAction(self.env.getIndexFromState(state), action)
             ###### TEMPORARY-TD(LAMBDA)
             self.Q.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_Q, is_learner_td_lambda=False)
             # Use the following condition `self.lmbda > 0` when we want to update the weights using the TD(lambda) gradient (defined as delta * multiplier_delta), as opposed to the gradient of the model loss
@@ -536,7 +536,7 @@ class LeaTDLambda(Learner):
                 # Use the alpha associated to the currently visited state and action as learning rate for ALL state-actions visited in the past,
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
-                _alphas2 = self.getAlphaForStateAction(state, action)
+                _alphas2 = self.getAlphaForStateAction(self.env.getIndexFromState(state), action)
             ###### TEMPORARY-TD(LAMBDA)
             # Use the following condition `self.lmbda > 0` when we want to update the weights using the TD(lambda) gradient (defined as delta * multiplier_delta), as opposed to the gradient of the model loss
             self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A, is_learner_td_lambda=False)
@@ -565,7 +565,7 @@ class LeaTDLambda(Learner):
 
             # Dummy vector signalling the currently visited state-action which defines the additional term being subtracted below when V_new_minus_old != 0.0
             A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
-            A_vector[self.A.getLinearIndex(state, action)] = 1.0
+            A_vector[self.A.getLinearIndex(self.env.getIndexFromState(state), action)] = 1.0
             self.A.setWeights(self.A.getWeights() + (delta + V_new_minus_old) * self._z_A - \
                                                     V_new_minus_old * A_vector)
 
@@ -846,7 +846,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # Use the alpha associated to the currently visited state as learning rate for ALL states visited in the past,
             # (i.e. `_alphas` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_V
             # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing V(s).
-            _alphas = self.getAlphaForState(state)
+            _alphas = self.getAlphaForState(self.env.getIndexFromState(state))
         self._alphas_effective = np.r_[self._alphas_effective, (_alphas * self._z_V).reshape(1, len(self._z_V))]
             ## NOTE: We need to reshape the product alpha*z because _alphas_effective is a 2D array with as many rows as
             ## the number of episodes run so far and as many columns as the number of states. The length of alpha*z
@@ -894,7 +894,7 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
             # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient
             # (because we need to retroactively apply the newly computed lambda to previous eligibility traces)
             gradient_V = self.V.X[:, state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
-            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(state, action)] if self.Q is not None else None
+            gradient_Q = self.Q.X[:, self.Q.getLinearIndex(self.env.getIndexFromState(state), action)] if self.Q is not None else None
             # Use the following calculation of the gradient for FIRST-VISIT TD(lambda)
             # (i.e. the gradient is set to 0 if the current visit of `state` is not the first one)
             #gradient_V * (self._state_counts[state] == 1)  # For first-visit TD(lambda)
