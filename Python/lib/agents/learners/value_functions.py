@@ -1294,8 +1294,8 @@ if __name__ == "__main__":
     seed = 1717 #1317
     debug = True
 
-    env_type = Environment.MountainCar
-    #env_type = Environment.Gridworld
+    #env_type = Environment.MountainCar
+    env_type = Environment.Gridworld
 
     # We define whether to use a neural network model for value functions BEFORE the environment definition because, in the case of the Mountain Car,
     # the state space is "continuous" (i.e. the simulation state is the 2D state (x, v)) when an NN is used and otherwise it is "discrete"
@@ -1308,7 +1308,7 @@ if __name__ == "__main__":
     #-- Environment characteristics
     if env_type == Environment.Gridworld:
         # Gridworld with random obstacles
-        prop_obstacles = 0.1; seed_obstacles = 4217
+        prop_obstacles = 0.3; seed_obstacles = 4217
         size_vertical = 6; size_horizontal = 8
         size_vertical = 10; size_horizontal = 14
         env_shape = (size_vertical, size_horizontal)
