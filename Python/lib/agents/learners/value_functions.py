@@ -461,6 +461,9 @@ class ValueFunctionApproxNN:
         self.seed = seed    # The seed is stored for informational purposes, just to know the seed with which we initialized the object, if needed
         self.reset(seed=self.seed)
 
+    def resetInitialLearningRate(self):
+        self.optimizer.param_groups[0]['lr'] = self.lr
+
     def reset(self, method=ResetMethod.ALLZEROS, params_random=None, seed=None):
         "Resets the value function to random values for every state around the value zero, optionally using a seed for the random initialization of the neural network weights"
         self.init_value(seed=seed)  # It may be recommended to initialize biases
@@ -618,6 +621,12 @@ class ValueFunctionApproxNN:
 
         return gradient_numpy
 
+    def getInitialLearningRate(self):
+        return self.lr
+
+    def getLearningRate(self):
+        return self.optimizer.param_groups[0]['lr']
+
     def getAdamLearningRates(self):
         "Returns a 1D tensor with the CURRENT learning rate of the Adam optimizer for each parameter in the model"
         # (2025/08/26) NOT TESTED YET
@@ -664,6 +673,13 @@ class ValueFunctionApproxNN:
             n_parameters_assigned_so_far += _n_parameters_to_process_now
         assert n_parameters_assigned_so_far == len(params), \
             f"All parameter values given in `params` must have been processed (#processed params={n_parameters_assigned_so_far}, #values in `params`)={len(params)}"
+
+    def setLearningRate(self, lr):
+        self.optimizer.param_groups[0]['lr'] = lr
+
+    def decreaseLearningRateBy(self, step):
+        "Decreases the current learning rate ('lr' attribute of param_groups) by `step`. Note that in the case of the Adam optimizer, this is the INITIAL learning rate, not the EFFECTIVE learning rate."
+        self.optimizer.param_groups[0]['lr'] /= max(1, step)
 
     def isTabular(self):
         return False
