@@ -482,6 +482,7 @@ else:
 max_time_steps_per_policy_learning_episode = _multiplier*test_ac.getEnv().getNumStates() if problem_2d else 2*test_ac.getEnv().getNumStates() #np.prod(env_shape) * 10 #max_time_steps_benchmark // n_episodes_per_learning_step   # Maximum number of steps per episode while LEARNING THE *POLICY* ONLINE (NOT used for the value functions (critic) learning)
 allow_deterministic_policy = True #False
 adjust_policy_learning_rate = False; t_learn_min_to_adjust_policy_learning_rate = 1   # This affects both the ONLINE learning of the policy AND the NPG learning
+homogeneous_policy_learning_rate = True  # Whether to use a homogeneous policy learning rate (the default) as opposed to a learning rate that depends on the standard deviation of the advantage function across actions of each state
 reset_value_functions_at_every_learning_step = False #(learning_method == "values_fv")     # Reset the value functions when learning with FV, o.w. the learning can become too unstable due to the oversampling of the states with high value... (or something like that)
 
 # 2) Parameters about VALUE FUNCTION learning (Critic)
@@ -557,7 +558,7 @@ simulators = dict({ # TD and TD(lambda) learners
                     'values_fvl3': test_ac.sim_fvl,
                     'values_fva': test_ac.sim_fva,
                     })
-learning_methods = ["values_fvl"] #, "values_tdl", "values_fv", "values_td"] #["values_fv"] #["values_fv", "values_td"]
+learning_methods = ["values_fvl"] #["values_fvl", "values_tdl", "values_fv", "values_td"] #["values_fv"] #["values_fv", "values_td"]
 for learning_method in learning_methods:
     runfile(os.path.join(rootdir, "../Python/lib/run_policy_learning_discrete.py"), wdir=os.path.join(rootdir, "../Python/lib/"))
 

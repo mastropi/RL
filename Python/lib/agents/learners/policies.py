@@ -995,13 +995,6 @@ class LeaActorCriticNN(GenericLearner):
         Learner used to learn the state and action value functions.
         Ex: LeaTDLambda
 
-    optimizer_learning_rate: (opt) float
-        Learning rate for the policy parameter learner.
-        If this is the Adam optimizer, this parameter is automatically adapted by the optimizer.
-        If this is used for the Natural Policy Gradient learning, it is NOT adapted automatically, but it can be updated by the user via the
-        setOptimizerLearningRate() method.
-        default: 0.1
-
     reset_value_functions: (opt) bool
         Whether to reset the value functions at every policy learning step.
         It may be useful NOT to reset the value functions between learning steps because the current step
@@ -1021,6 +1014,20 @@ class LeaActorCriticNN(GenericLearner):
         action is set to 1 - 0.05.
         default: False
 
+    optimizer_learning_rate: (opt) float
+        Learning rate for the policy parameter learner.
+        If this is the Adam optimizer, this parameter is automatically adapted by the optimizer.
+        If this is used for the Natural Policy Gradient learning, it is NOT adapted automatically, but it can be updated by the user via the
+        setOptimizerLearningRate() method.
+        default: 0.1
+
+    homogeneous_policy_learning_rate: (opt) bool
+        In the natural policy gradient approach (see learn_natural() method), whether to use a homogeneous policy learning state across states,
+        as opposed to a learning rate that is a function of the standard deviation of the advantage function across actions in each state.
+        Normally, a good strategy is to DECREASE the learning state for larger standard deviations because this should indicate that more learning
+        has taken place about the given state's advantage function of the action, than for another state with smaller standard deviation.
+        default: True
+
     seed: (opt) int
         Seed to be used to generate the trajectories under the current policy to perform one-step learning
         of the policy parameter.
@@ -1030,13 +1037,15 @@ class LeaActorCriticNN(GenericLearner):
         the same sequence of random numbers every time trajectories are simulated.
         default: None
     """
-    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, allow_deterministic_policy=False, reset_value_functions=True, initial_policy=None, optimizer_learning_rate=0.1, seed=None, debug=False):
+    def __init__(self, env: EnvironmentDiscrete, policy, learner_value_functions, allow_deterministic_policy=False, reset_value_functions=True, initial_policy=None,
+                                                                                  optimizer_learning_rate=0.1, homogeneous_policy_learning_rate=True, seed=None, debug=False):
         # SEE ALSO ALL THE OTHER LEARNING PARAMETERS DEFINED IN LeaPolicyGradient (e.g. learning rate alpha, etc.)
         super().__init__(env)
         self.policy = policy
         self.allow_deterministic_policy = allow_deterministic_policy
         self.epsilon_away_from_deterministic = 0.05     # epsilon used to adjust deterministic policies away from probability 1. Note that this value is divided by the number of actions when forcing policies away from deterministic, so its actual effect may be much smaller than stated by this attribute value.
         self.optimizer_learning_rate = optimizer_learning_rate
+        self.homogeneous_policy_learning_rate = homogeneous_policy_learning_rate
         # Note: the value functions learner is ONLY used when no critic is provided to the self.learn() method defined in this object to learn the optimal policy.
         # Since this attribute is reset by calling reset() below and we do NOT want to reset the value functions learner used to create a critic when one is provided to learn(),
         # we here create a COPY of the value functions learner passed as parameter.
@@ -1371,14 +1380,39 @@ class LeaActorCriticNN(GenericLearner):
         nS = np.prod(self.env.getShape())
         nA = self.env.getNumActions()
 
+        # Default case: an homogeneous learning rate across states
+        learning_rates_by_state = self.optimizer_learning_rate * np.ones(nS)
+        if not self.homogeneous_policy_learning_rate:
+            # Distribution (across states) of the standard deviation of the advantage function (across actions)
+            advantage2d = advantage_values.reshape(nS, nA)  # Each row corresponds to a different state
+            advantage_std_by_state = advantage2d.std(axis=1)
+            adv_min, adv_max, adv_median, adv_mean = advantage_std_by_state.min(), advantage_std_by_state.max(), pd.Series(advantage_std_by_state).median(), advantage_std_by_state.mean()
+            adv_center = adv_mean #adv_median   # It seems it's better to use the MEAN than the MEDIAN (instead of faster learning and more stable H(s,a) estimates that cross "less".
+            if (adv_max > adv_center) and (adv_min < adv_center):
+                # Consider a non-homogeneous policy learning rate ONLY when the "center" advantage is between its minimum and maximum value across states
+                # (this may not be true when the center is defined by the advantage's mean value (as opposed to the median)
+
+                # Define an LR adjustment function (of the standard deviation) that varies between -1 and +1
+                std_distance_from_mean_normalized = (advantage_std_by_state - adv_center) / (adv_max - adv_center) * np.array(advantage_std_by_state >= adv_center).astype(int) + \
+                                                    (advantage_std_by_state - adv_center) / (adv_center - adv_min) * np.array(advantage_std_by_state <  adv_center).astype(int)
+                # The learning rate by state is a sigmoid function of the separation between the state's standard deviation of the advantage and the average standard deviation
+                # varying between a positive small value and 2*self.optimizer_learning_rate. The larger the standard deviation of H(s,.) from its mean, the smaller the learning rate.
+                decreasing_lr_with_std = True
+                sign_exp = (int(decreasing_lr_with_std) - 0.5)*2  # The sign of the exponential is +1 if we want an LR that decreases with the standard deviation distance, or -1 o.w.
+                lr_min_factor = 0.1 # The learning rate should not go below 10% of the nominal learning rate, so there is still some learning going on.
+                learning_rates_by_state = self.optimizer_learning_rate * ((2 - lr_min_factor) / (1 + np.exp(sign_exp*10*std_distance_from_mean_normalized)) + lr_min_factor)
+
         old_policy = self.policy.get_policy_values()
         new_policy = np.zeros((nS, nA))  #, dtype=np.float32)    # Note: (2024/08/03) using dtype=np.float32 (which was done with Alphonse in order to avoid the weird error by torch that it was expecting Double but got Float or viceversa) gives the following error down the line when working with tensors in torch: "Could not infer dtype of numpy.float32", and apparently the reason is that the default type in numpy if float64, whereas the default type in torch is float32. More info: https://stackoverflow.com/questions/61226042/pytorch-infer-dtype-from-device-capability-not-input-data
         # TODO: (2025/05/21) Reshape the variable `advantage` into the same shape as the policy so that we can avoid a LOOP and make the update of the policy much faster
         for state in range(nS):
+            # TODO: (2026/06/11) Eliminate the `action` loop and use the following one-liner
+            # new_policy[state, :] = old_policy[state, :] * np.exp(self.optimizer_learning_rate * advantage_values[state * nA + np.arange(nA)])
             for action in range(nA):
                 advantage = advantage_values[state * self.env.getNumActions() + action]
-                # TODO: (2024/08/04) Consider reducing the learning rate as learning happens (maybe based on the KL distance between the new and old policy?) in order to reduce the oscillation observed in the objective function value as the policy is learned
-                new_policy[state, action] = old_policy[state, action] * (np.exp(self.optimizer_learning_rate * advantage))
+                # [done: (2026/06/09) This is implemented via the existing execution parameter in used in run_policy_learning_discrete.py called adjust_policy_learning_rate] (2024/08/04) Consider reducing the learning rate as learning happens (maybe based on the KL distance between the new and old policy?) in order to reduce the oscillation observed in the objective function value as the policy is learned
+                # [done: (2026/06/09)] Another interesting alternative would be to adjust the learning rate based on the standard deviation of the advantage values (across actions) => The larger the std. dev. the smaller the learning rate, because it means that a lot has been learned already (since the H(s,a) values are fairly separated among different actions)
+                new_policy[state, action] = old_policy[state, action] * (np.exp(learning_rates_by_state[state] * advantage))
             new_policy[state, :] = new_policy[state, :] / sum(new_policy[state, :])
 
         self.policy.set_policy_values(new_policy)

@@ -66,6 +66,7 @@ params_exec = dict([(k, eval(k)) for k in [  # --- Environment
                                             'use_advantage',
                                             'policy_learning_rate',
                                             'adjust_policy_learning_rate',
+                                            'homogeneous_policy_learning_rate',
                                             'reset_value_functions_at_every_learning_step',
                                             # --- Critic
                                             'use_function_approximation',
@@ -132,7 +133,8 @@ if learning_method == "all_online":
     learner_ac = LeaActorCriticNN(test_ac.getEnv(), simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
                                   allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy,
-                                  optimizer_learning_rate=policy_learning_rate, seed=test_ac.seed, debug=True)
+                                  optimizer_learning_rate=policy_learning_rate, homogeneous_policy_learning_rate=homogeneous_policy_learning_rate,
+                                  seed=test_ac.seed, debug=True)
 else:
     # Value functions (Critic) are learned separately from the application of the policy and the policy (Actor) may be learned OFFLINE or online
     # IMPORTANT: We pass the policy of the agent stored in the value functions simulator as policy for the Actor-Critic learner so that when the Actor-Critic learner
@@ -141,7 +143,8 @@ else:
     learner_ac = LeaActorCriticNN(test_ac.getEnv(), simulator_value_functions.getAgent().getPolicy(), simulator_value_functions.getAgent().getLearner(),
                                   allow_deterministic_policy=allow_deterministic_policy,
                                   reset_value_functions=reset_value_functions_at_every_learning_step, initial_policy=initial_policy,
-                                  optimizer_learning_rate=policy_learning_rate, seed=test_ac.seed, debug=True)
+                                  optimizer_learning_rate=policy_learning_rate, homogeneous_policy_learning_rate=homogeneous_policy_learning_rate,
+                                  seed=test_ac.seed, debug=True)
 
 time_start = timer()
 cpu_start = process_time()
