@@ -4411,10 +4411,10 @@ class Simulator:
 
                 if self.debug:
                     # We place this message BEFORE calling learner.learn() below because we want to show the state value BEFORE and after updating it (by learner.learn())
-                    print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
-                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[state], learner.getAlphaForState(state),
-                                  state, learner.V.getValue(state),
-                                  state, action, learner.Q.getValue(state, action),
+                    print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha(s)={:.3f}, alpha(s,a)={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
+                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[self.env.getIndexFromState(state)], learner.getAlphaForState(self.env.getIndexFromState(state)), learner.getAlphaForStateAction(self.env.getIndexFromState(state), action),
+                                  state, self._get_state_value(learner, state),
+                                  state, action, self._get_action_value(learner, state, action),
                                   state), end="")
 
                 # Learn: i.e. update the value functions (stored in the learner) for the *currently visited state and action* with the new observation
@@ -5084,8 +5084,8 @@ class Simulator:
 
                 if self.debug:
                     # We place this message BEFORE calling learner.learn() below because we want to show the state value BEFORE and after updating it (by learner.learn())
-                    print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
-                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[self.env.getIndexFromState(state)], learner.getAlphaForState(self.env.getIndexFromState(state)),
+                    print("t: {}, t in episode: {}, s={}, a={} -> ns={}, r={}: state_count={:.0f}, alpha(s)={:.3f}, alpha(s,a)={:.3f}, V({})={:.4f}, Q({},{})={:.4f} -> V({})=" \
+                          .format(t, t_episode, state, action, next_state, reward, learner.getStateCounts()[self.env.getIndexFromState(state)], learner.getAlphaForState(self.env.getIndexFromState(state)), learner.getAlphaForStateAction(self.env.getIndexFromState(state), action),
                                   state, self._get_state_value(learner, state),
                                   state, action, self._get_action_value(learner, state, action),
                                   state), end="")

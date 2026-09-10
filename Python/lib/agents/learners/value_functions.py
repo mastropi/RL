@@ -1021,7 +1021,8 @@ class ActionValueFunctionApproxNN(ValueFunctionApproxNN):
         if is_learner_td_lambda:
             # Learning happens by updating the theta parameter in our learner (e.g. LeaTDLambda)
 
-            # The following step on the optimizer, even if we don't use it update the model parameters with self.optimizer.step(), is crucial in order to avoid estimation divergence!
+            # The following step on the optimizer.zero_grad(), even if we don't use it to update the model parameters with self.optimizer.step(),
+            # is crucial in order to avoid estimation divergence!
             # In fact, if we don't do it, the gradient w.r.t. the output bias increases linearly to 1, 2, 3, ... because the gradient of the a single output neuron is always 1
             # (see answer by the guru of PyTorch, ptrblck at https://discuss.pytorch.org/t/model-param-grad-is-none-how-to-debug/52634)
             # and this value 1 is summed up to the already stored gradient (1) if no zero_grad() call is done before computing the gradient!
@@ -1310,7 +1311,7 @@ if __name__ == "__main__":
         # Gridworld with random obstacles
         prop_obstacles = 0.3; seed_obstacles = 4217
         size_vertical = 6; size_horizontal = 8
-        size_vertical = 10; size_horizontal = 14
+        #size_vertical = 10; size_horizontal = 14
         env_shape = (size_vertical, size_horizontal)
         n_obstacles = int(prop_obstacles * np.prod(env_shape))
 
@@ -1347,7 +1348,7 @@ if __name__ == "__main__":
         # (recall that in the discrete_state=False case (i.e. when the Mountain Car state is treated as continuous, both representations (physical and simulation) are the same
         # and equal to (x, v)).
         problem_difficulty = {'easy': {'factor_force': 20, 'factor_for_force_and_gravity': 100},
-                              'difficulty': {'factor_force': 1, 'factor_for_force_and_gravity': 10}
+                              'difficult': {'factor_force': 1, 'factor_for_force_and_gravity': 10}
                               }
         difficulty_level = 'easy'
         env_mc = MountainCarDiscrete(nx=20, nv=20, factor_force=problem_difficulty[difficulty_level]['factor_force'],
@@ -1374,7 +1375,7 @@ if __name__ == "__main__":
     batch_size = 50; epochs = 50; sampling_rate = 1.0; oversample = False
     batch_size = 50; epochs = 25; sampling_rate = 1.0; oversample = False   # use 25 epochs for faster learning than with 50
 
-    learner_type = "fv"
+    learner_type = "td" #"fv"
     lr = 1E-3 #1E-2 #1E-1 #1E-2 #1E-3
     nn_input = InputLayer.STATE  #InputLayer.ONEHOT  #InputLayer.SINGLE
     nn_input_V = env.getNumStates() if nn_input == InputLayer.ONEHOT else 2 + 1 if nn_input == InputLayer.STATE else 1    # `2 + 1`: `+1` for a dummy neuron to signal terminal states
@@ -1388,13 +1389,15 @@ if __name__ == "__main__":
     # (2025/08/04) In my case:
     # a) when using more neurons in hidden layer (e.g. 48 instead of 12), the estimation of V(s) becomes more curved... but actually NOT better...
     # b) when using more hidden layers, it seems there is a vanishing gradient problem because the value function V(s) is hardly updated, even with larger alpha = 10!
+    # See also this paper where they analyze the effect of the network width in the NN training and performance: https://arxiv.org/abs/2010.14495
+    # "Are wider nets better given the same number of parameters?" (2021)
     nn_hidden_layer_sizes_V = [48] #[12] #[144] #[48, 12] #[128] #[12] #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_V, 1])))]
-    #nn_hidden_layer_sizes_Q = [12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
+    nn_hidden_layer_sizes_Q = [48] #[6] #[48] #[12]  #[48]  #[12, 24]  #[8, 12]  #[int(np.round(np.mean([nn_input_Q, 2])))]
     dict_function_approximations = None
     if use_neural_network:
         dict_function_approximations = dict({'V': StateValueFunctionApproxNN(env, nn_input=nn_input_V, nn_hidden_layer_sizes=nn_hidden_layer_sizes_V, lr=lr),
                                              'Q': None, #ActionValueFunctionApproxNN(env, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr),
-                                             #'A': ActionValueFunctionApproxNN(env, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q)
+                                             #'A': ActionValueFunctionApproxNN(env, nn_input=nn_input_Q, nn_hidden_layer_sizes=nn_hidden_layer_sizes_Q, lr=lr)
                                              })
 
     # Policy characteristics (the policy model is currently ONLY used to define the dynamics but it is NOT learned, only value functions are learned)
@@ -1419,6 +1422,7 @@ if __name__ == "__main__":
     lmbda = 0.7 #0.0
     # 2025/08/04: Definition of the initial learning rate. When using NN, now that we have implemented using grad(V) to update theta instead of the Adam optimizer itself
     # (which is useful to include TD(lambda) as a learning strategy), starting at learning rate alpha = 1.0 may be too large... (too large oscillations of the estimate of V(s))
+    # Note that the value of alpha_ini has NO effect when learning the NN parameters using the Adam optimizer.
     # UPDATE: (2025/08/04) When learning using FV, the alpha value CANNOT be as large as 1.0!! For TD(0), alpha = 1.0 is ok, but NOT for FV(0)... WHY?
     alpha_ini = 1.0 #1.0 if learner_type == "td" or not use_neural_network or use_neural_network and lmbda == 0.0 else 0.1
     alpha_min = 0.0 if learning_mode == LearningMode.BATCH else alpha_ini/10

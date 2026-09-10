@@ -92,8 +92,12 @@ class LeaTDLambda(Learner):
             self._z_Q = np.zeros(self.Q.getDimension())
             self._z_Q_all = np.zeros((0, self.Q.getDimension()))  # Historic information
         # Eligibility traces for learning A, which are ALWAYS TABULAR (for the Generalized Advantage Estimation (GAE) --Ref: https://arxiv.org/abs/1707.06347, Schulman et al. (2017))
-        self._z_A = np.zeros(self.env.getNumStates() * self.env.getNumActions())
-        self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))  # Historic information
+        if self.A is None or self.A.isTabular():
+            self._z_A = np.zeros(self.env.getNumStates() * self.env.getNumActions())
+            self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))  # Historic information
+        else:
+            self._z_A = np.zeros(self.A.getDimension())
+            self._z_A_all = np.zeros((0, self.A.getDimension()))  # Historic information
 
         # (Nov-2020) Product of alpha and z (the eligibility trace)
         # which gives the EFFECTIVE alpha value of the Stochastic Approximation algorithm
@@ -124,8 +128,12 @@ class LeaTDLambda(Learner):
         if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
             self._z_Q[:] = 0.
             self._z_Q_all = np.zeros((0, self.Q.getDimension()))
-        self._z_A[:] = 0.
-        self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
+        if self.A is None or self.A.isTabular():
+            self._z_A[:] = 0.
+            self._z_A_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
+        else:
+            self._z_A[:] = 0.
+            self._z_A_all = np.zeros((0, self.A.getDimension()))
 
         # The effective alphas correspond to the alpha learning rates multiplied by the eligibility traces, as that gives the actual update strength of the value functions
         # They are only computed for the learning of V, not of Q
@@ -202,7 +210,12 @@ class LeaTDLambda(Learner):
             # namely by `\tilde{H} := TD-error * "eligibility trace for H at current state and action"`,
             # where TD-error should be the one-step TD-error computed on a FIXED V(s) estimation (within an episode or epoch),
             # and this is why we use delta_V_fixed to multiply the eligibility trace self._z_A, as opposed to using `delta`.
+            # (2026/09/10: I verified in practice that this is CRUCIAL... if we use the above update call instead of the below update call and the TD(lambda) learner calls
+            # in the other two places below where such call is needed if we want to perform TD(lambda) learning,
+            # we end with a V(s) function that becomes OUT OF BOUND! This was observed in a 6x8 labyrinth with no wind with obstacles seed = 4127
+            # whose V(s) values are estimated by running value_functions.py using FV learning with ONLINE learning of an NN with 48 hidden neurons.)
             # (for more details, see my notes at the back of the SAS loose sheets, with date 15-Oct-2025 then copied to the SPSS notebook).
+            # NOTE: This update ONLY works when the advantage function A(s,a) is TABULAR.
             #self._updateV(delta_V_fixed*self._z_A[self.A.getLinearIndex(self.env.getIndexFromState(state), action)] if self.lmbda > 0 else delta_V_fixed, state=state)
             ###### TEMPORARY-TD(LAMBDA)
 
@@ -214,9 +227,11 @@ class LeaTDLambda(Learner):
             V_new_minus_old = self.V.getValue(state) - V_old
 
             # Update the advantage function
-            self._updateA_GAE(delta_V_fixed, state=state, action=action, V_new_minus_old=V_new_minus_old if use_true_GAE else 0.0)
-            #self._deprecated_updateA(state, action, delta_V)
-            #self._updateA(delta_V, state=state, action=action)
+            if self.A is None or self.A.isTabular():
+                self._updateA_GAE(delta_V_fixed, state=state, action=action, V_new_minus_old=V_new_minus_old if use_true_GAE else 0.0)
+            else:
+                #self._deprecated_updateA(state, action, delta_V)
+                self._updateA(delta_V_fixed, state=state, action=action)
 
             # We store the effective learning rates alpha
             # (effective in terms of  the eligibility trace that affects the delta values used when updating V above)
@@ -390,7 +405,7 @@ class LeaTDLambda(Learner):
         Updates the eligibility traces used for learning V and those used for learning Q
 
         Parameter `use_true_GAE` enables changing the calculation of the eligibility trace for the advantage function (self._z_A)
-        in order to apply TRUE GAE when learning the advantage function with _updateA_GAE().
+        in order to apply TRUE GAE when learning the advantage function with _updateA_GAE() in the tabular advantage context.
         """
         ###### TEMPORARY-TD(LAMBDA)
         # Note: delta_V is NOT used when V(s) is TABULAR (see the self.V.getGradient() method of the tabular case
@@ -406,26 +421,41 @@ class LeaTDLambda(Learner):
             self._z_V_all = np.r_[self._z_V_all, self._z_V.reshape(1, len(self._z_V))]
 
         if self.Q is not None:  # We may not want to learn Q(s,a) to save time (e.g. when learning policies based on the advantage function which only requires estimation of V(s))
+            ###### TEMPORARY-TD(LAMBDA)
             # Note: delta_Q is NOT used when Q(s,a) is TABULAR (see the self.Q.getGradient() method of the tabular case
-            gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=False) #lmbda > 0)
+            gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=False)
+            # Use the following condition `lmbda > 0` when we want to compute the gradient contributing to the eligibility trace as the gradient of V(s) w.r.t. the NN model parameters (as opposed to being computed from the gradient of the loss) --althogh I am not sure if there is a difference... (16-May-2026)
+            #gradient_Q = self.Q.getGradient(state, action, delta_Q, is_learner_td_lambda=lmbda > 0)
+            ###### TEMPORARY-TD(LAMBDA)
             if gradient_Q is not None:
                 self._z_Q = self.gamma * lmbda * self._z_Q + \
                             gradient_Q
                 self._z_Q_all = np.r_[self._z_Q_all, self._z_Q.reshape(1, len(self._z_Q))]
 
-        # Eligibility traces for GAE, the update of the advantage function using the Generalized Advantage Estimation which allows implementing TD(lambda)
-        # Actually GAE is the same as TD(lambda), but it just has a different name because what is updated is not the state value function, as in TD(lambda), but the advantage.
-        A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
-        # Set the component of A_vector that will be affected (in _updateA()) by delta_V, to update the advantage of the currently visited state-action
-        A_vector[self.A.getLinearIndex(self.env.getIndexFromState(state), action)] = 1.0
-        # We define the eligibility trace of the advantage function following Sutton, page 300, where they talk about TRUE online TD(lambda).
-        # The goal is to better implement GAE(lambda) (the Generalized Advantage Estimator) compared to plain GAE(lambda).
-        # What we do here mimics TRUE online TD(lambda), which is based on defining the TD error as R(t+1) + gamma * V_t(S(t+1)) - V_{t-1}(S(t)),
-        # i.e. by using the PREVIOUS estimate of v(S(t)) as subtracting predicted value, instead of the current estimate V_t(S(t)).
-        # Ref: http://incompleteideas.net/book/first/ebook/node76.html
-        self._z_A = self.gamma * lmbda * self._z_A + \
-                    (1 - int(use_true_GAE) * self.gamma * lmbda * self._z_A[self.A.getLinearIndex(self.env.getIndexFromState(state), action)]) * A_vector
-        self._z_A_all = np.r_[self._z_A_all, self._z_A.reshape(1, len(self._z_A))]
+        if self.A is None or self.A.isTabular():
+            # Eligibility traces for GAE, the update of the advantage function using the Generalized Advantage Estimation which allows implementing TD(lambda)
+            # Actually GAE is the same as TD(lambda), but it just has a different name because what is updated is not the state value function, as in TD(lambda), but the advantage.
+            A_vector = np.zeros(self.env.getNumStates() * self.env.getNumActions(), dtype=float)
+            # Set the component of A_vector that will be affected (in _updateA()) by delta_V, to update the advantage of the currently visited state-action
+            A_vector[self.A.getLinearIndex(self.env.getIndexFromState(state), action)] = 1.0
+            # We define the eligibility trace of the advantage function following Sutton, page 300, where they talk about TRUE online TD(lambda).
+            # The goal is to better implement GAE(lambda) (the Generalized Advantage Estimator) compared to plain GAE(lambda).
+            # What we do here mimics TRUE online TD(lambda), which is based on defining the TD error as R(t+1) + gamma * V_t(S(t+1)) - V_{t-1}(S(t)),
+            # i.e. by using the PREVIOUS estimate of v(S(t)) as subtracting predicted value, instead of the current estimate V_t(S(t)).
+            # Ref: http://incompleteideas.net/book/first/ebook/node76.html
+            self._z_A = self.gamma * lmbda * self._z_A + \
+                        (1 - int(use_true_GAE) * self.gamma * lmbda * self._z_A[self.A.getLinearIndex(self.env.getIndexFromState(state), action)]) * A_vector
+            self._z_A_all = np.r_[self._z_A_all, self._z_A.reshape(1, len(self._z_A))]
+        else:
+            ###### TEMPORARY-TD(LAMBDA)
+            gradient_A = self.A.getGradient(state, action, delta_V, is_learner_td_lambda=False)
+            # Use the following condition `lmbda > 0` when we want to compute the gradient contributing to the eligibility trace as the gradient of H(s,a) w.r.t. the NN model parameters (as opposed to being computed from the gradient of the loss) --althogh I am not sure if there is a difference... (16-May-2026)
+            #gradient_A = self.A.getGradient(state, action, delta_V, is_learner_td_lambda=lmbda > 0)
+            ###### TEMPORARY-TD(LAMBDA)
+            if gradient_A is not None:
+                self._z_A = self.gamma * lmbda * self._z_A + \
+                            gradient_A
+                self._z_A_all = np.r_[self._z_A_all, self._z_A.reshape(1, len(self._z_A))]
 
     def _updateV(self, delta, state):
         if delta != 0.0:
@@ -528,6 +558,10 @@ class LeaTDLambda(Learner):
 
     def _updateA(self, delta, state, action):
         if delta != 0.0:
+            ## NOTE HOWEVER, that the update of the advantage function, there is NO alpha (see my PhD thesis for details)
+            ## or the paper by Schulman et al. 2015 where they introduce GAE.
+            ## NEVERTHELESS, here I use an alpha learning rate in order to control the magnitude of the update when using TD(lambda) learning,
+            ## o.w. using the supposedly correct alpha = 1 has usually made the values of the advantage function unbounded! (I don't know how to justify this)
             # For details about the computation of _alphas2, see comments in the _updateQ() method
             if self.A.isTabular():
                 # As many learning rates alpha as number of state-actions: each state-action affected by the eligibility trace will have their own alpha
@@ -537,6 +571,7 @@ class LeaTDLambda(Learner):
                 # (i.e. `_alphas2` is a scalar value) as the learning rate needs to multiply the eligibility trace vector _z_Q
                 # whose dimension is NOT the number of states in the environment, but the dimension of the theta vector parameterizing the value function.
                 _alphas2 = self.getAlphaForStateAction(self.env.getIndexFromState(state), action)
+            #print(f"alpha for A(s,a), s={state}, a={action}, delta={delta}: {_alphas2}")
             ###### TEMPORARY-TD(LAMBDA)
             # Use the following condition `self.lmbda > 0` when we want to update the weights using the TD(lambda) gradient (defined as delta * multiplier_delta), as opposed to the gradient of the model loss
             self.A.updateWeights(state, action, delta, multiplier_delta=_alphas2 * self._z_A, is_learner_td_lambda=False)
@@ -683,8 +718,10 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
         # bootstrapping information about the value function at the next state)
         self.state_counts_noreset = np.zeros(self.env.getNumStates())
 
-        #-- Variables used in the HOMOGENEOUS adaptive type case
+        #-- Variables used in the HOMOGENEOUS adaptive type case, which assumes that V and Q are linear approximations (including of course the tabular case)
         self._gradient_V_all = np.zeros((0, self.env.getNumStates()))
+        if self.Q is not None:
+            self._gradient_Q_all = np.zeros((0, self.env.getNumStates() * self.env.getNumActions()))
 
         #-- Variables for lambda statistics over all episodes
         # List of lists to store the lambdas used for each state in each episode
@@ -884,15 +921,16 @@ class LeaTDLambdaAdaptive(LeaTDLambda):
     
             #input("Press Enter...")
 
-    def _updateZ(self, state, action, lmbda):
+    def _updateZ(self, state, action, lmbda, delta_V=None, delta_Q=None, use_true_GAE=False):
         if self.debug and False:
             print("")
             print("state = {}: lambda = {:.2f}".format(state, lmbda))
         if self.adaptive_type == AdaptiveLambdaType.ATD:
-            super()._updateZ(state, action, lmbda)
+            super()._updateZ(state, action, lmbda, delta_V=delta_V, delta_Q=delta_Q, use_true_GAE=use_true_GAE)
         else:
             # In the HOMOGENEOUS adaptive lambda we need to store the HISTORY of the gradient
             # (because we need to retroactively apply the newly computed lambda to previous eligibility traces)
+            # *** NOTE: (2026/09/08) All that follows assumes that the value functions are LINEAR approximations (which of course includes the tabular case). ***
             gradient_V = self.V.X[:, state]      # Note: this is returned as a ROW vector, even when we retrieve the `state` COLUMN of matrix X
             gradient_Q = self.Q.X[:, self.Q.getLinearIndex(self.env.getIndexFromState(state), action)] if self.Q is not None else None
             # Use the following calculation of the gradient for FIRST-VISIT TD(lambda)
